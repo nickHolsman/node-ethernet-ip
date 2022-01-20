@@ -45,6 +45,8 @@ const readEDS = async (file_path) => {
                             objEDS[prevItem] = parseParamsSection(item);
                             break;
                         case sections.ASSEMBLY:
+                            // Add assemblies to the EDS Object
+                            objEDS[prevItem] = parseAssemblySection(item);
                             break;
                     }
                 }
@@ -61,7 +63,7 @@ const parseFileSection = (data) => {
 
 /**
  * 
- * @param {string} data - to be parse for EDS params
+ * @param {string} data - to be parsed for EDS params
  */
 const parseParamsSection = (data) => {
     let array = data.split(/\=|;/);
@@ -112,14 +114,45 @@ const parseParamsSection = (data) => {
 };
 
 const parseAssemblySection = (data) => {
-    
+    let objAssem = [];
+    let currentAssem;
+
+    // Split assembly items
+    let array = data.split(/\=|;/);
+    array.forEach((element,index) => {
+        // Remove whitespace and line feeds from begining or each string
+        //item.replace(//)
+        let item = element.trim();
+
+        if (item === "") {
+            return;
+        }
+
+        let paramRegex = new RegExp("^Assem");
+        if (paramRegex.test(item)) {
+            // Set the assem value in object
+            let assemName = item.replace(/\s/g,"");  // Remove any whitespace
+            currentAssem = assemName;
+        }
+        else {
+            // Add the assem info to parameter object
+            let assem = {
+                Assem: currentAssem,
+                Data: parseAssemItem(item)
+            };
+            
+            // Push to assembly holding object
+            objAssem.push(assem);
+        }
+    });
+    return objAssem;
 };
 
 const parseParamsItem = (data) => {
     let array = data.split(/,|;/);
     let param = {};
 
-    // Split by param or enum
+    // Split param contents
     array.forEach((element,index) => {
         let item = element.trim();
         /* eslint-disable indent */
@@ -217,7 +250,7 @@ const parseEnumItem = (data) => {
     let enumData = {};
     let currentEnum;
 
-    // Split by param or enum
+    // Split enum contents
     array.forEach((element,index) => {
         let item = element.trim();
         if (index % 2 == 0) {
@@ -229,6 +262,64 @@ const parseEnumItem = (data) => {
         }
     });
     return enumData;
+};
+
+const parseAssemItem = (data) => {
+    let array = data.split(/,|;/);
+    let assem = {
+        Members: []
+    };
+    let currentSize;
+
+    // Split assembly contents
+    array.forEach((element,index) => {
+        let item = element.trim();
+        
+        let regex1 = new RegExp("[A-Za-z]","g");
+        /* eslint-disable indent */
+        switch(index) {
+            case 0:
+                // Name
+                assem["Name"] = item.replace(/"/g,"");
+                break;
+            case 1:
+                // Link Path
+                assem["LinkPath"] = item.replace(/"/g,"");
+                break;
+            case 2:
+                // Data Block Size
+                assem["DataBlockSize"] = item;
+                break;
+            case 3:
+                // Options
+                assem["Options"] = item;
+                break;
+            case 4:
+                // Res
+                break;
+            case 5:
+                // Res
+                break;
+            default:
+                if (item === "") {
+                    assem.Members.push({
+                        Param: "Padding",
+                        Size: currentSize
+                    });
+                }
+                else if (regex1.test(item)) {
+                    assem.Members.push({
+                        Param: item,
+                        Size: currentSize
+                    });
+                }
+                else {
+                    currentSize = item;
+                }
+                break;
+        }
+    });
+    return assem;
 };
 
 module.exports = { readEDS };
