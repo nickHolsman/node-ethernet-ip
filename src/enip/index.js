@@ -1,5 +1,5 @@
 const { Socket, isIPv4 } = require("net");
-const { EIP_PORT } = require("../config");
+const { EIP_PORT, UDP_PORT } = require("../config");
 const encapsulation = require("./encapsulation");
 const CIP = require("./cip");
 const { promiseTimeout } = require("../utilities");

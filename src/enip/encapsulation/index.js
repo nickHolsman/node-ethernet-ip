@@ -317,7 +317,7 @@ const sendRRData = (session, data, timeout = 10) => {
  *
  * @param {number} session - Encapsulation Session ID
  * @param {Buffer} data - Data to be Sent via Connected Message
- * @param {number} ConnectionID - Connection ID from FWD_OPEN
+ * @param {number} ConnectionID - Connection ID from FWD_
  * @param {number} SequenceNumber - Sequence Number of Datagram
  * @returns {string} Connected Message Datagram String
  */

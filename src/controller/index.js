@@ -3,6 +3,8 @@ const dateFormat = require("dateformat");
 const TagGroup = require("../tag-group");
 const { delay, promiseTimeout } = require("../utilities");
 const Queue = require("task-easy");
+const dgram =require("dgram");
+const config = require("../config");
 
 const compare = (obj1, obj2) => {
     if (obj1.priority > obj2.priority) return true;
@@ -31,6 +33,7 @@ class Controller extends ENIP {
                 majorUnrecoverableFault: false,
                 io_faulted: false
             },
+            ip_address: null,
             subs: new TagGroup(compare),
             scanning: false,
             scan_rate: 200 //ms
@@ -116,13 +119,14 @@ class Controller extends ENIP {
         this.state.controller.path = PORT.build(BACKPLANE, SLOT);
 
         const sessid = await super.connect(IP_ADDR);
+        this.ip_address = IP_ADDR;
 
         if (!sessid) throw new Error("Failed to Register Session with Controller");
 
         this._initializeControllerEventHandlers();
 
         // Fetch Controller Properties and Wall Clock
-        await this.readControllerProps();
+        //await this.readControllerProps();
     }
 
     /**
@@ -142,11 +146,17 @@ class Controller extends ENIP {
      */
     write_cip(data, connected = false, timeout = 10, cb = null) {
         const { UnconnectedSend } = CIP;
-
         const msg = UnconnectedSend.build(data, this.state.controller.path);
 
         //TODO: Implement Connected Version
         super.write_cip(msg, connected, timeout, cb);
+    }    
+
+    start_implicit(cycle_time, connected = false, timeout = 10, cb = null) {
+        return this.workers.read.schedule(this._start_implicit.bind(this), [cycle_time], {
+            priority: 1,
+            timestamp: new Date()
+        });
     }
 
     /**
@@ -465,6 +475,54 @@ class Controller extends ENIP {
         this.on("SendRRData Received", this._handleSendRRDataReceived);
     }
 
+    async _start_implicit(cycle_time, connected = false, timeout = 10, cb = null) {
+        const { ForwardOpen } = CIP;
+        const msg = ForwardOpen.build();
+
+        super.write_cip(msg, connected, timeout, cb);
+
+        const forwardOpenErr = new Error("TIMEOUT occurred during forward open.");
+
+        // Wait for Response
+        const data = await promiseTimeout(
+            new Promise((resolve, reject) => {
+                this.on("Forward Open", (err, data) => {
+                    if (err) reject(err);
+                    resolve(data);
+                });
+            }),
+            10000,
+            forwardOpenErr
+        );
+
+        this.removeAllListeners("Forward Open");
+        let res = ForwardOpen.parse(data);
+        console.info(`Connection ID ${res.to_connectionId} successfully established!`);
+
+        // Start UDP socket to receive I/O messaging datagrams
+        const sessionIO = dgram.createSocket('udp4');
+        console.info("Connecting via UDP...");
+
+        // emits when any error occurs
+        sessionIO.on('error', function (error) {
+            console.log('Error: ' + error);
+            sessionIO.close();
+        });
+
+        sessionIO.on('listening', () => {
+            const address = sessionIO.address();
+            console.log(`UDP server listening ${address.address}:${address.port}`);
+        });
+
+        sessionIO.on('message', (msg, rinfo) => {
+            console.log(`server received: ${msg.toString("hex")} from ${rinfo.address}:${rinfo.port}`);
+            //ForwardOpen.parse(msg);
+        });
+
+        sessionIO.bind(2222);
+
+    }
+
     /**
      * Reads Value of Tag and Type from Controller
      *
@@ -663,6 +721,8 @@ class Controller extends ENIP {
             MULTIPLE_SERVICE_PACKET
         } = CIP.MessageRouter.services;
 
+        const { FORWARD_OPEN_SERVICE } = CIP.ForwardOpen;
+
         let error = generalStatusCode !== 0 ? { generalStatusCode, extendedStatus } : null;
 
         // Route Incoming Message Responses
@@ -747,6 +807,10 @@ class Controller extends ENIP {
                 responses.push(msgData);
 
                 this.emit("Multiple Service Packet", error, responses);
+                break;
+            }
+            case FORWARD_OPEN_SERVICE: {
+                this.emit("Forward Open", error, data);
                 break;
             }
             default:
