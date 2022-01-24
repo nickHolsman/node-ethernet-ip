@@ -36,7 +36,7 @@ const generateConnectionSerial = () => {
  * @param {number} [timeout=2000] - timeout in milliseconds 
  * @returns 
  */
- const build = (cycle_time = 1000, timeout = 2000) => {
+const build = (cycle_time = 1000, timeout = 2000) => {
     let buf = Buffer.alloc(42);
 
     // Get Encoded Timeout
@@ -144,8 +144,8 @@ const parse = (data) => {
         ot_api: ot_api,
         to_api: to_api,
         applicationReply: applicationReply
-    }
-}
+    };
+};
 
 
 

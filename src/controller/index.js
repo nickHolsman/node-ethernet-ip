@@ -5,6 +5,10 @@ const { delay, promiseTimeout } = require("../utilities");
 const Queue = require("task-easy");
 const dgram =require("dgram");
 const config = require("../config");
+const { readEDS } = require("../eds-parser");
+const { Types } = require("../enip/cip/data-types");
+const { SINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
+const ci = require("correcting-interval");
 
 const compare = (obj1, obj2) => {
     if (obj1.priority > obj2.priority) return true;
@@ -36,13 +40,28 @@ class Controller extends ENIP {
             ip_address: null,
             subs: new TagGroup(compare),
             scanning: false,
-            scan_rate: 200 //ms
+            scan_rate: 200, //ms
+            EDS: {}, // EDS data
+            inputs: [],
+            outputs: [],
+            implicit: {
+                connectionInfo: {},
+                session: null,
+                connected: false,
+                receiving: false,
+                rawInput: null,
+                rawOutput: null,
+                inputSequence: null,
+                inputLength: null,
+                outputInterval: null
+            }
         };
 
         this.workers = {
             read: new Queue(compare, queue_max_size),
             write: new Queue(compare, queue_max_size),
-            group: new Queue(compare, queue_max_size)
+            group: new Queue(compare, queue_max_size),
+            io: new Queue(compare, queue_max_size),
         };
     }
 
@@ -111,7 +130,7 @@ class Controller extends ENIP {
      * @returns {Promise}
      * @memberof ENIP
      */
-    async connect(IP_ADDR, SLOT = 0) {
+    async connect(IP_ADDR, EDS_LOCATION = 0, SLOT = 0) {
         const { PORT } = CIP.EPATH.segments;
         const BACKPLANE = 1;
 
@@ -124,6 +143,12 @@ class Controller extends ENIP {
         if (!sessid) throw new Error("Failed to Register Session with Controller");
 
         this._initializeControllerEventHandlers();
+
+        // If EDS file is supplied, parse it
+        if (EDS_LOCATION != 0) {
+            //TODO: check EDS file exists
+            this._initializeEDS(EDS_LOCATION);
+        }
 
         // Fetch Controller Properties and Wall Clock
         //await this.readControllerProps();
@@ -152,11 +177,96 @@ class Controller extends ENIP {
         super.write_cip(msg, connected, timeout, cb);
     }    
 
-    start_implicit(cycle_time, connected = false, timeout = 10, cb = null) {
-        return this.workers.read.schedule(this._start_implicit.bind(this), [cycle_time], {
+    /**
+     * Starts an implicit connection 
+     * @param {string} inputAssem - assembly for inputs as given on EDS (ex: Assem1)
+     * @param {string} outputAssem - assembly for outputs as given on EDS (ex: Assem1)
+     * @param {*} cycle_time 
+     * @param {*} timeout 
+     * @param {*} cb 
+     * @returns 
+     */
+    start_implicit(input_assem, output_assem, cycle_time, timeout = 10, cb = null) {
+
+        // Throw error if EDS hasn't been supplied
+        if (!this.EDS) {
+            throw new Error("Must have EDS data to start implicit messaging");
+        }
+
+        let params = this.EDS.Params;
+        let bufferIndex = 0;
+        let currentParam = {
+            Param: null,
+            ByteSize: null,
+            Name: null,
+            Value: null,
+            Index: null
+        };
+
+        // Setup inputs for implicit messages
+        let index = this.EDS.Assembly.findIndex(x => x.Assem == input_assem);
+        let inputAssem = this.EDS.Assembly[index];
+        this.state.inputs = inputAssem.Data.Members.map( (element,index) => {
+            if (element.Param == "Padding") {
+                currentParam = {
+                    Param: element.Param,
+                    ByteSize: element.Size/8,
+                    Type: null,
+                    Name: "Padding",
+                    Value: null,
+                    Index: bufferIndex
+                };
+            }
+            else {
+                let paramData = params.find(x => x.Param == element.Param);
+                currentParam = {
+                    Param: element.Param,
+                    ByteSize: element.Size / 8,
+                    Type: Number(paramData.Data.DataType),
+                    Name: paramData.Data.Name.replace(/\s/g, ""),  // Remove any whitespace
+                    Value: null,
+                    Index: bufferIndex
+                };
+            }
+            bufferIndex += element.Size / 8;
+            return currentParam;
+        });
+
+        // Setup outputs for implicit messages
+        index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
+        let outputAssem = this.EDS.Assembly[index];
+        this.inputs = outputAssem.Data.Members.map( (element,index) => {
+            if (element.Param == "Padding") {
+                return {
+                    Param: element.Param,
+                    ByteSize: element.Size/8,
+                    Name: "Padding",
+                    Value: null
+                };
+            }
+            else {
+                let paramData = params.find(x => x.Param == element.Param);
+                return {
+                    Param: element.Param,
+                    ByteSize: element.Size / 8,
+                    Name: paramData.Data.Name.replace(/\s/g, ""),  // Remove any whitespace
+                    Value: null
+                };
+            }
+        });
+
+        // Schedule the implicit connection
+        this._start_implicit(cycle_time);
+        return;
+        
+        /* return this.workers.io.schedule(this._start_implicit.bind(this), [cycle_time], {
             priority: 1,
             timestamp: new Date()
-        });
+        }); */
+    }
+
+    stopImplicit() {
+
     }
 
     /**
@@ -475,6 +585,11 @@ class Controller extends ENIP {
         this.on("SendRRData Received", this._handleSendRRDataReceived);
     }
 
+    async _initializeEDS(file_location) {
+        this.EDS = await readEDS(file_location);
+        // Setup inputs and output
+    }
+
     async _start_implicit(cycle_time, connected = false, timeout = 10, cb = null) {
         const { ForwardOpen } = CIP;
         const msg = ForwardOpen.build();
@@ -496,31 +611,140 @@ class Controller extends ENIP {
         );
 
         this.removeAllListeners("Forward Open");
-        let res = ForwardOpen.parse(data);
-        console.info(`Connection ID ${res.to_connectionId} successfully established!`);
+        this.state.implicit.connectionInfo = ForwardOpen.parse(data);
+        console.info(`Connection ID ${this.state.implicit.connectionInfo.to_connectionId} successfully established!`);
 
         // Start UDP socket to receive I/O messaging datagrams
-        const sessionIO = dgram.createSocket('udp4');
-        console.info("Connecting via UDP...");
+        this.state.implicit.session = dgram.createSocket("udp4");
+        console.info("Connecting Implicit IO via UDP...");
 
         // emits when any error occurs
-        sessionIO.on('error', function (error) {
-            console.log('Error: ' + error);
-            sessionIO.close();
+        this.state.implicit.session.on("error", function (error) {
+            console.info("Implicit IO Server Error: " + error);
+            this.state.implicit.connected = false;
+            this.state.implicit.receiving = false;
+            this.state.implicit.session.close();
         });
 
-        sessionIO.on('listening', () => {
-            const address = sessionIO.address();
-            console.log(`UDP server listening ${address.address}:${address.port}`);
+        this.state.implicit.session.on("close", () => {
+            console.info("Implicit IO Server Closed");
+            this.state.implicit.connected = false;
+            this.state.implicit.receiving = false;
         });
 
-        sessionIO.on('message', (msg, rinfo) => {
-            console.log(`server received: ${msg.toString("hex")} from ${rinfo.address}:${rinfo.port}`);
-            //ForwardOpen.parse(msg);
+        this.state.implicit.session.on("listening", () => {
+            const address = this.state.implicit.session.address();
+            this.state.implicit.connected = true;
+            console.info(`Implicit IO Server listening on UDP port ${address.address}:${address.port}`);
+
+            // Start input timeout (this will reset after each received message)
+            /* this.state.implicit.inputTimer = this.setTimeout(() => {
+                
+            }, 100000); */
+
+            // Start sending output at specified O->T API from Forward Open response
+            /* this.state.implicit.outputInterval = ci.setCorrectingInterval( () => {
+                // Send stored rawOutput
+                this.state.implicit.session.send(this.state.implicit.rawOutput);
+
+            },this.state.implicit.connectionInfo.ot_api); */
         });
 
-        sessionIO.bind(2222);
+        this.state.implicit.session.on("message", (msg, rinfo) => {
+            //TODO: convert to streams
+            console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}: ${msg.toString("hex")}`);
 
+            if (!this.state.implicit.receiving) {
+                // Update state variables for tracking
+                this.state.implicit.receiving = true;
+                this.state.implicit.rawInput = msg;
+                this.state.implicit.inputLength = msg.readUInt16LE(16) - 2; // subtract 2 for sequence number
+                this.state.implicit.rawInput =  Buffer.alloc(this.state.implicit.inputLength); 
+                
+            }
+            // Get new data from incoming buffer
+            let newData = Buffer.alloc(this.state.implicit.inputLength);
+            msg.copy(newData,0,20,20+this.state.implicit.inputLength);
+            console.debug("DATA: ",newData.toString("hex"));
+
+            this._processImplicitInput(newData);
+
+            return;
+        });
+
+        // Bind the UDP port to start listening
+        this.state.implicit.session.bind(config.UDP_PORT);
+
+    }
+
+    async _processImplicitInput(new_data) {
+        // Check if data changed
+        if (new_data.equals(this.state.implicit.rawInput)) { return; }
+
+        let dataIndex = 0;
+
+        // Check which inputs changed, update the state parameters, and emit events for each that changed
+        for (const pair of new_data.entries()) {
+
+            // Compare to dataIndex, used to skip ahead to the next data once size is known
+            if (pair[0] != dataIndex) { continue; }
+
+            // Test if new data is different from last
+            if (pair[1] == this.state.implicit.rawInput[pair[0]]) { continue; }
+
+            // Find corresponding parameter for given buffer index and update
+            let inputIndex = this.state.inputs.findIndex((element) => element.Index == pair[0]);
+            let inputItem = this.state.inputs[inputIndex];
+
+            // Update value based on data type
+            /* eslint-disable indent */
+            switch (inputItem.Type) {
+                case SINT:
+                    inputItem.Value = new_data.readInt8(pair[0]);
+                    dataIndex += 1;
+                    break;
+                case INT:
+                    inputItem.Value = new_data.readInt16LE(pair[0]);
+                    dataIndex += 2;
+                    break;
+                case DINT:
+                    inputItem.Value = new_data.readInt32LE(pair[0]);
+                    dataIndex += 4;
+                    break;
+                case UDINT:
+                    inputItem.Value = new_data.readUInt32LE(pair[0]);
+                    dataIndex += 4;
+                    break;
+                case REAL:
+                    inputItem.Value = new_data.readFloatLE(pair[0]);
+                    dataIndex += 4;
+                    break;
+                case BIT_STRING:
+                    inputItem.Value.alloc(inputItem.ByteSize);
+                    new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
+                    dataIndex += inputItem.ByteSize;
+                    break;
+                case BOOL:
+                    inputItem.Value = new_data.readUInt8(pair[0]) !== 0;
+                    dataIndex += 1;
+                    break;
+                default:
+                    throw new Error(
+                        `Unrecognized Type Passed: ${inputItem.Type}`
+                    );
+            }
+            /* eslint-enable indent */
+
+            // Emit event for listeners of this parameter (use controller.on)
+            this.emit(inputItem.Name, inputItem.Value);
+
+            this.state.inputs[inputIndex] = inputItem;
+            console.log(inputItem.ByteSize);
+        }
+
+        // Copy new data to rawinput buffer
+        new_data.copy(this.state.implicit.rawInput, 0, 0);
+        return;
     }
 
     /**
