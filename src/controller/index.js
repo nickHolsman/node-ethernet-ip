@@ -203,10 +203,15 @@ class Controller extends ENIP {
             Index: null
         };
 
-        // Setup inputs for implicit messages
-        let index = this.EDS.Assembly.findIndex(x => x.Assem == input_assem);
-        let inputAssem = this.EDS.Assembly[index];
-        this.state.inputs = inputAssem.Data.Members.map( (element,index) => {
+        // Setup outputs for implicit messages
+        let index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
+
+        if (index < 0) {
+            throw new Error("Output assembly not found!"); 
+        }
+
+        let outputAssem = this.EDS.Assembly[index];
+        this.outputs = outputAssem.Data.Members.map( (element) => {
             if (element.Param == "Padding") {
                 currentParam = {
                     Param: element.Param,
@@ -219,11 +224,13 @@ class Controller extends ENIP {
             }
             else {
                 let paramData = params.find(x => x.Param == element.Param);
+                let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
+
                 currentParam = {
                     Param: element.Param,
                     ByteSize: element.Size / 8,
                     Type: Number(paramData.Data.DataType),
-                    Name: paramData.Data.Name.replace(/\s/g, ""),  // Remove any whitespace
+                    Name: paramName,
                     Value: null,
                     Index: bufferIndex
                 };
@@ -232,27 +239,51 @@ class Controller extends ENIP {
             return currentParam;
         });
 
-        // Setup outputs for implicit messages
-        index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
-        let outputAssem = this.EDS.Assembly[index];
-        this.inputs = outputAssem.Data.Members.map( (element,index) => {
+        // Setup inputs for implicit messages
+        index = this.EDS.Assembly.findIndex(x => x.Assem == input_assem);
+        bufferIndex = 0;
+        currentParam = {
+            Param: null,
+            ByteSize: null,
+            Name: null,
+            Value: null,
+            Index: null
+        };
+
+        if (index < 0) {
+            throw new Error("Input assembly not found!"); 
+        }
+
+        let inputAssem = this.EDS.Assembly[index];
+        this.state.inputs = inputAssem.Data.Members.map( (element) => {
             if (element.Param == "Padding") {
-                return {
+                currentParam = {
                     Param: element.Param,
                     ByteSize: element.Size/8,
+                    Type: null,
                     Name: "Padding",
-                    Value: null
+                    Value: null,
+                    Index: bufferIndex
                 };
             }
             else {
                 let paramData = params.find(x => x.Param == element.Param);
-                return {
+                let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
+                // Check if this parameter name exists on outputs, if so mark it as such
+                let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name = paramName);
+
+                currentParam = {
                     Param: element.Param,
                     ByteSize: element.Size / 8,
-                    Name: paramData.Data.Name.replace(/\s/g, ""),  // Remove any whitespace
-                    Value: null
+                    Type: Number(paramData.Data.DataType),
+                    Name: paramName,
+                    Value: null,
+                    Index: bufferIndex,
+                    pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null
                 };
             }
+            bufferIndex += element.Size / 8;
+            return currentParam;
         });
 
         // Schedule the implicit connection
@@ -643,6 +674,7 @@ class Controller extends ENIP {
             }, 100000); */
 
             // Start sending output at specified O->T API from Forward Open response
+            // Check for at least one received inputs so duplicate parameters have been matched
             /* this.state.implicit.outputInterval = ci.setCorrectingInterval( () => {
                 // Send stored rawOutput
                 this.state.implicit.session.send(this.state.implicit.rawOutput);
@@ -656,7 +688,6 @@ class Controller extends ENIP {
 
             if (!this.state.implicit.receiving) {
                 // Update state variables for tracking
-                this.state.implicit.receiving = true;
                 this.state.implicit.rawInput = msg;
                 this.state.implicit.inputLength = msg.readUInt16LE(16) - 2; // subtract 2 for sequence number
                 this.state.implicit.rawInput =  Buffer.alloc(this.state.implicit.inputLength); 
@@ -669,6 +700,12 @@ class Controller extends ENIP {
 
             this._processImplicitInput(newData);
 
+            if (!this.state.implicit.receiving) {
+                // Update receiving state variable so outputs can be sent
+                // this way any paired outputs will not get overridden by null values
+                this.state.implicit.receiving = true; 
+            }
+
             return;
         });
 
@@ -678,7 +715,7 @@ class Controller extends ENIP {
     }
 
     async _processImplicitInput(new_data) {
-        // Check if data changed
+        // If data hasn't changed from last, do not process
         if (new_data.equals(this.state.implicit.rawInput)) { return; }
 
         let dataIndex = 0;
@@ -738,12 +775,81 @@ class Controller extends ENIP {
             // Emit event for listeners of this parameter (use controller.on)
             this.emit(inputItem.Name, inputItem.Value);
 
+            // Update state input
             this.state.inputs[inputIndex] = inputItem;
-            console.log(inputItem.ByteSize);
+
+            // Update paired output if exists
+            if (inputItem.pairedOutputIndex !== null) {
+                this.state.outputs[inputItem.pairedOutputIndex].Value = inputItem.Value;
+            }
+            console.debug(inputItem.ByteSize);
         }
 
         // Copy new data to rawinput buffer
         new_data.copy(this.state.implicit.rawInput, 0, 0);
+        return;
+    }
+
+    _setOutput(outputIndex,newValue) {
+
+        // Check if output is index number or variable name
+        if (typeof outputIndex !== "number") {
+            throw new Error("Output index must be of type number");
+        }    
+
+        // Find buffer index
+        let bufferIndex = this.state.outputs[outputIndex].Index;
+
+        // Update state output
+        this.state.outputs[outputIndex].Value = newValue;
+
+        // Update raw buffer
+        /* eslint-disable indent */
+        switch (this.state.outputs[outputIndex].Type) {
+            case SINT:
+                this.state.implicit.rawOutput.writeInt8(newValue,bufferIndex);
+                break;
+            case INT:
+                this.state.implicit.rawOutput.writeInt16LE(newValue,bufferIndex);
+                break;
+            case DINT:
+                this.state.implicit.rawOutput.writeInt32LE(newValue,bufferIndex);
+                break;
+            case UDINT:
+                this.state.implicit.rawOutput.writeUInt32LE(newValue,bufferIndex);
+                break;
+            case REAL:
+                this.state.implicit.rawOutput.writeFloatLE(newValue,bufferIndex);
+                break;
+            case BIT_STRING:
+                //TODO: not yet working
+                throw new Error("Not Yet Implemented");
+                /* this.state.outputs[outputIndex].Value.alloc(inputItem.ByteSize);
+                new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
+                break; */
+            case BOOL:
+                this.state.implicit.rawOutput.writeUInt8(newValue,bufferIndex);
+                break;
+            default:
+                throw new Error(
+                    `Unrecognized Type Passed: ${this.state.outputs[outputIndex].Type}`
+                );
+        }
+        /* eslint-enable indent */
+
+        return;
+    }
+
+    _setOutputByName(outputName,newValue) {
+        let index;
+
+        if (typeof outputName !== "string" || !(outputName instanceof String)) {
+            throw new Error("Output index must be of type number");  
+        }
+
+        index = this.state.outputs.findIndex(element => element.Name == outputName);
+
+        this._setOutput(index,newValue);
         return;
     }
 
