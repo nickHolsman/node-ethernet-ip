@@ -49,6 +49,7 @@ const readEDS = async (file_path) => {
                             objEDS[prevItem] = parseAssemblySection(item);
                             break;
                     }
+                    /* eslint-enable indent */
                 }
             });
             resolve(objEDS);
@@ -241,6 +242,7 @@ const parseParamsItem = (data) => {
                 param["DecimalPlaces"] = item.replace(/;/,"");
                 break;
         }
+        /* eslint-enable indent */
     });
     return param;
 };
@@ -318,6 +320,7 @@ const parseAssemItem = (data) => {
                 }
                 break;
         }
+        /* eslint-enable indent */
     });
     return assem;
 };
