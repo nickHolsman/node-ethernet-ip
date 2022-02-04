@@ -18,7 +18,7 @@ const compare = (obj1, obj2) => {
 
 class Controller extends ENIP {
     constructor({ queue_max_size } = {}) {
-        super();
+        super();                                                                                                                                                                                 
         
         this.state = {
             ...this.state,
@@ -49,10 +49,13 @@ class Controller extends ENIP {
                 session: null,
                 connected: false,
                 receiving: false,
+                sending: false,
                 rawInput: null,
                 rawOutput: null,
                 inputSequence: null,
+                outputSequence: 0,
                 inputLength: null,
+                outputLength: null,
                 outputInterval: null
             }
         };
@@ -203,7 +206,9 @@ class Controller extends ENIP {
             Index: null
         };
 
+        //
         // Setup outputs for implicit messages
+        //
         let index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
 
         if (index < 0) {
@@ -211,7 +216,7 @@ class Controller extends ENIP {
         }
 
         let outputAssem = this.EDS.Assembly[index];
-        this.outputs = outputAssem.Data.Members.map( (element) => {
+        this.state.outputs = outputAssem.Data.Members.map( (element) => {
             if (element.Param == "Padding") {
                 currentParam = {
                     Param: element.Param,
@@ -235,11 +240,20 @@ class Controller extends ENIP {
                     Index: bufferIndex
                 };
             }
-            bufferIndex += element.Size / 8;
+            // If bit string then allocate size
+            if (currentParam.Type == BIT_STRING) {
+                currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+            }
+
+            bufferIndex += currentParam.ByteSize;
             return currentParam;
         });
+        this.state.implicit.rawOutput = Buffer.alloc(bufferIndex);
 
+
+        //
         // Setup inputs for implicit messages
+        //
         index = this.EDS.Assembly.findIndex(x => x.Assem == input_assem);
         bufferIndex = 0;
         currentParam = {
@@ -263,14 +277,15 @@ class Controller extends ENIP {
                     Type: null,
                     Name: "Padding",
                     Value: null,
-                    Index: bufferIndex
+                    Index: bufferIndex,
+                    pairedOutputIndex: null
                 };
             }
             else {
                 let paramData = params.find(x => x.Param == element.Param);
                 let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
                 // Check if this parameter name exists on outputs, if so mark it as such
-                let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name = paramName);
+                let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name == paramName);
 
                 currentParam = {
                     Param: element.Param,
@@ -282,9 +297,15 @@ class Controller extends ENIP {
                     pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null
                 };
             }
-            bufferIndex += element.Size / 8;
+            // If bit string then allocate size
+            if (currentParam.Type == BIT_STRING) {
+                currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+            }
+
+            bufferIndex += currentParam.ByteSize;
             return currentParam;
         });
+        //this.state.implicit.rawInput = Buffer.alloc(bufferIndex+1);
 
         // Schedule the implicit connection
         this._start_implicit(cycle_time);
@@ -296,8 +317,11 @@ class Controller extends ENIP {
         }); */
     }
 
-    stopImplicit() {
-
+    async stop_implicit() {
+        // Send FORWARD CLOSE request
+        // stop UDP server
+        this.state.implicit.session.close();
+        return;
     }
 
     /**
@@ -654,6 +678,7 @@ class Controller extends ENIP {
             console.info("Implicit IO Server Error: " + error);
             this.state.implicit.connected = false;
             this.state.implicit.receiving = false;
+            this.state.implicit.sending = false;
             this.state.implicit.session.close();
         });
 
@@ -661,6 +686,7 @@ class Controller extends ENIP {
             console.info("Implicit IO Server Closed");
             this.state.implicit.connected = false;
             this.state.implicit.receiving = false;
+            this.state.implicit.sending = false;
         });
 
         this.state.implicit.session.on("listening", () => {
@@ -669,41 +695,45 @@ class Controller extends ENIP {
             console.info(`Implicit IO Server listening on UDP port ${address.address}:${address.port}`);
 
             // Start input timeout (this will reset after each received message)
-            /* this.state.implicit.inputTimer = this.setTimeout(() => {
-                
-            }, 100000); */
+            this._inputTimeout(2000);
 
-            // Start sending output at specified O->T API from Forward Open response
-            // Check for at least one received inputs so duplicate parameters have been matched
-            /* this.state.implicit.outputInterval = ci.setCorrectingInterval( () => {
-                // Send stored rawOutput
-                this.state.implicit.session.send(this.state.implicit.rawOutput);
-
-            },this.state.implicit.connectionInfo.ot_api); */
         });
 
-        this.state.implicit.session.on("message", (msg, rinfo) => {
+        this.state.implicit.session.on("message", async (msg, rinfo) => {
             //TODO: convert to streams
-            console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}: ${msg.toString("hex")}`);
+            //console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}: ${msg.toString("hex")}`);
+            console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}`);
 
             if (!this.state.implicit.receiving) {
                 // Update state variables for tracking
                 this.state.implicit.rawInput = msg;
                 this.state.implicit.inputLength = msg.readUInt16LE(16) - 2; // subtract 2 for sequence number
                 this.state.implicit.rawInput =  Buffer.alloc(this.state.implicit.inputLength); 
-                
             }
+
             // Get new data from incoming buffer
             let newData = Buffer.alloc(this.state.implicit.inputLength);
             msg.copy(newData,0,20,20+this.state.implicit.inputLength);
-            console.debug("DATA: ",newData.toString("hex"));
+            //console.debug("DATA: ",newData.toString("hex"));
+
+            // Clear and re-aply timeout
+            clearTimeout(this.state.implicit.inputTimer);
+            this._inputTimeout(2000);
 
             this._processImplicitInput(newData);
+
+            
 
             if (!this.state.implicit.receiving) {
                 // Update receiving state variable so outputs can be sent
                 // this way any paired outputs will not get overridden by null values
-                this.state.implicit.receiving = true; 
+                this.state.implicit.receiving = true;
+
+                this.state.implicit.outputLength = this.state.implicit.rawOutput.length;
+
+                // Start sending output at specified O->T API from Forward Open response
+                // Check for at least one received inputs so duplicate parameters have been matched
+                this._startSendingOutputs();
             }
 
             return;
@@ -714,9 +744,69 @@ class Controller extends ENIP {
 
     }
 
-    async _processImplicitInput(new_data) {
+    async _inputTimeout(timeout = 2000) {
+        this.state.implicit.inputTimer = setTimeout(() => {
+            console.debug("Implicit message timeout");
+            //TODO: Reconnect handling
+            //this.connect(this.ip_address)
+
+        }, timeout);
+    }
+
+    async _startSendingOutputs() {
+        this.state.implicit.outputInterval = ci.setCorrectingInterval(this._sendOutput.bind(this),this.state.implicit.connectionInfo.ot_api);
+        return;
+    }
+
+    async _sendOutput() {     
+        // Package IO message with stored rawOutput
+        let buf = Buffer.alloc(18+2+4+this.state.implicit.outputLength);
+
+        // Item Count
+        buf.writeUInt16LE(2,0);
+
+        // Type ID Sequenced Address Item (0x8002)
+        buf.writeUInt16LE(32770,2);
+
+        // Length
+        buf.writeUInt16LE(8,4);
+
+        // Connection ID
+        buf.writeUInt32LE(this.state.implicit.connectionInfo.ot_connectionId,6);
+
+        // Sequence Number
+        this.state.implicit.outputSequence++;
+        buf.writeUInt32LE(this.state.implicit.outputSequence,10);
+
+        // Type ID Connected Data Item (0x00B1)
+        buf.writeUInt16LE(177,14);
+
+        // Length
+        buf.writeUInt16LE(this.state.implicit.rawOutput.length+2+4,16);
+
+        // CIP Sequence Count
+        buf.writeUInt16LE(this.state.implicit.outputSequence-1,18);
+
+        //TODO: this needs to be read from the EDS connection manager section
+        //for whether modeless or 32-bit header is expected. same for parsing incoming
+        // Add 32-bit header for UR robot
+        buf.writeUInt32LE(1,20);
+
+        // Raw output data buffer
+        this.state.implicit.rawOutput.copy(buf,24);
+
+        await this.state.implicit.session.send(buf,config.UDP_PORT,this.ip_address);
+        if (!this.state.implicit.sending) {this.state.implicit.sending = true;}
+        //console.debug("Outputs sent!",this.state.implicit.rawOutput.toString("hex"));
+        return;
+    }
+
+    _processImplicitInput(new_data) {
         // If data hasn't changed from last, do not process
-        if (new_data.equals(this.state.implicit.rawInput)) { return; }
+        if (new_data.equals(this.state.implicit.rawInput)) { 
+            console.debug("No new data");
+            return; 
+        }
 
         let dataIndex = 0;
 
@@ -724,46 +814,44 @@ class Controller extends ENIP {
         for (const pair of new_data.entries()) {
 
             // Compare to dataIndex, used to skip ahead to the next data once size is known
-            if (pair[0] != dataIndex) { continue; }
-
-            // Test if new data is different from last
-            if (pair[1] == this.state.implicit.rawInput[pair[0]]) { continue; }
+            if (pair[0] != dataIndex) { continue;}
 
             // Find corresponding parameter for given buffer index and update
             let inputIndex = this.state.inputs.findIndex((element) => element.Index == pair[0]);
             let inputItem = this.state.inputs[inputIndex];
+
+            // Test if new data is different from last
+            if (pair[1] == this.state.implicit.rawInput[pair[0]]) { 
+                dataIndex += inputItem.ByteSize;
+                continue; 
+            }       
 
             // Update value based on data type
             /* eslint-disable indent */
             switch (inputItem.Type) {
                 case SINT:
                     inputItem.Value = new_data.readInt8(pair[0]);
-                    dataIndex += 1;
                     break;
                 case INT:
                     inputItem.Value = new_data.readInt16LE(pair[0]);
-                    dataIndex += 2;
                     break;
                 case DINT:
                     inputItem.Value = new_data.readInt32LE(pair[0]);
-                    dataIndex += 4;
                     break;
                 case UDINT:
                     inputItem.Value = new_data.readUInt32LE(pair[0]);
-                    dataIndex += 4;
                     break;
                 case REAL:
                     inputItem.Value = new_data.readFloatLE(pair[0]);
-                    dataIndex += 4;
                     break;
                 case BIT_STRING:
-                    inputItem.Value.alloc(inputItem.ByteSize);
                     new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
-                    dataIndex += inputItem.ByteSize;
+                    //console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
                     break;
                 case BOOL:
                     inputItem.Value = new_data.readUInt8(pair[0]) !== 0;
-                    dataIndex += 1;
+                    break;
+                case null:
                     break;
                 default:
                     throw new Error(
@@ -771,6 +859,11 @@ class Controller extends ENIP {
                     );
             }
             /* eslint-enable indent */
+
+            // add to index
+            dataIndex += inputItem.ByteSize;
+
+            console.debug(`${inputItem.Name} updated to: ${inputItem.Value}`);
 
             // Emit event for listeners of this parameter (use controller.on)
             this.emit(inputItem.Name, inputItem.Value);
@@ -780,9 +873,9 @@ class Controller extends ENIP {
 
             // Update paired output if exists
             if (inputItem.pairedOutputIndex !== null) {
-                this.state.outputs[inputItem.pairedOutputIndex].Value = inputItem.Value;
+                this._setOutput(inputItem.pairedOutputIndex,inputItem.Value);
             }
-            console.debug(inputItem.ByteSize);
+            //console.debug(inputItem.ByteSize);
         }
 
         // Copy new data to rawinput buffer
@@ -794,41 +887,64 @@ class Controller extends ENIP {
 
         // Check if output is index number or variable name
         if (typeof outputIndex !== "number") {
-            throw new Error("Output index must be of type number");
-        }    
+            throw new Error(`Output index must be of type number, received: ${outputIndex}`);
+        }
 
         // Find buffer index
         let bufferIndex = this.state.outputs[outputIndex].Index;
 
-        // Update state output
-        this.state.outputs[outputIndex].Value = newValue;
-
-        // Update raw buffer
+        // Update raw buffer and state output
         /* eslint-disable indent */
         switch (this.state.outputs[outputIndex].Type) {
             case SINT:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                }
                 this.state.implicit.rawOutput.writeInt8(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             case INT:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                }
                 this.state.implicit.rawOutput.writeInt16LE(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             case DINT:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                }
                 this.state.implicit.rawOutput.writeInt32LE(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             case UDINT:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                }
                 this.state.implicit.rawOutput.writeUInt32LE(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             case REAL:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                }
                 this.state.implicit.rawOutput.writeFloatLE(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             case BIT_STRING:
-                //TODO: not yet working
-                throw new Error("Not Yet Implemented");
-                /* this.state.outputs[outputIndex].Value.alloc(inputItem.ByteSize);
-                new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
-                break; */
+                // Update state output
+                newValue.copy(this.state.outputs[outputIndex].Value);
+                newValue.copy(this.state.implicit.rawOutput,bufferIndex);
+                break;
             case BOOL:
                 this.state.implicit.rawOutput.writeUInt8(newValue,bufferIndex);
+                // Update state output
+                this.state.outputs[outputIndex].Value = newValue;
                 break;
             default:
                 throw new Error(
@@ -843,11 +959,12 @@ class Controller extends ENIP {
     _setOutputByName(outputName,newValue) {
         let index;
 
-        if (typeof outputName !== "string" || !(outputName instanceof String)) {
+        /* if (typeof outputName !== "string" || !(outputName instanceof String)) {
             throw new Error("Output index must be of type number");  
-        }
+        } */
 
         index = this.state.outputs.findIndex(element => element.Name == outputName);
+        console.debug(index);
 
         this._setOutput(index,newValue);
         return;
