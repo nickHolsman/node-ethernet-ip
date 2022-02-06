@@ -137,21 +137,26 @@ class Controller extends ENIP {
         const { PORT } = CIP.EPATH.segments;
         const BACKPLANE = 1;
 
-        this.state.controller.slot = SLOT;
-        this.state.controller.path = PORT.build(BACKPLANE, SLOT);
-
-        const sessid = await super.connect(IP_ADDR);
-        this.ip_address = IP_ADDR;
-
-        if (!sessid) throw new Error("Failed to Register Session with Controller");
-
-        this._initializeControllerEventHandlers();
-
         // If EDS file is supplied, parse it
         if (EDS_LOCATION != 0) {
             //TODO: check EDS file exists
             this._initializeEDS(EDS_LOCATION);
         }
+
+        this.state.controller.slot = SLOT;
+        this.state.controller.path = PORT.build(BACKPLANE, SLOT);
+        this.state.ip_address = IP_ADDR;
+        let sessid;
+
+        try {
+            sessid = await super.connect(IP_ADDR);
+        } catch(err) {
+            throw new Error("Failed to Register Session with Controller");
+        }
+
+        if (!sessid) throw new Error("Failed to Register Session with Controller");
+
+        this._initializeControllerEventHandlers();
 
         // Fetch Controller Properties and Wall Clock
         //await this.readControllerProps();
@@ -186,10 +191,9 @@ class Controller extends ENIP {
      * @param {string} outputAssem - assembly for outputs as given on EDS (ex: Assem1)
      * @param {*} cycle_time 
      * @param {*} timeout 
-     * @param {*} cb 
      * @returns 
      */
-    start_implicit(input_assem, output_assem, cycle_time, timeout = 10, cb = null) {
+    async start_implicit(input_assem, output_assem, cycle_time = 1000, timeout = 2000) {
 
         // Throw error if EDS hasn't been supplied
         if (!this.EDS) {
@@ -308,7 +312,7 @@ class Controller extends ENIP {
         //this.state.implicit.rawInput = Buffer.alloc(bufferIndex+1);
 
         // Schedule the implicit connection
-        this._start_implicit(cycle_time);
+        await this._start_implicit(cycle_time,timeout);
         return;
         
         /* return this.workers.io.schedule(this._start_implicit.bind(this), [cycle_time], {
@@ -502,6 +506,21 @@ class Controller extends ENIP {
         this.state.controller.time = date;
     }
 
+    addTag(tag, isInput, isOutput) {
+        if (isInput) {
+            let inputIndex = this.state.inputs.findIndex(element => element.Name == tag.name);
+            let input = this.state.inputs[inputIndex];
+            input.tag = tag;
+            this.state.inputs[inputIndex] = input;
+        }
+
+        if (isOutput) {
+            let outputIndex = this.state.outputs.findIndex(element => element.Name == tag.name);
+            let output = this.state.outputs[outputIndex];
+            output.tag = tag;
+        }
+    }
+
     /**
      * Reads Value of Tag and Type from Controller
      *
@@ -645,11 +664,11 @@ class Controller extends ENIP {
         // Setup inputs and output
     }
 
-    async _start_implicit(cycle_time, connected = false, timeout = 10, cb = null) {
+    async _start_implicit(cycle_time=1000, timeout=2000) {
         const { ForwardOpen } = CIP;
-        const msg = ForwardOpen.build();
+        const msg = ForwardOpen.build(cycle_time,timeout);
 
-        super.write_cip(msg, connected, timeout, cb);
+        super.write_cip(msg);
 
         const forwardOpenErr = new Error("TIMEOUT occurred during forward open.");
 
@@ -695,7 +714,7 @@ class Controller extends ENIP {
             console.info(`Implicit IO Server listening on UDP port ${address.address}:${address.port}`);
 
             // Start input timeout (this will reset after each received message)
-            this._inputTimeout(2000);
+            this._inputTimeout(timeout);
 
         });
 
@@ -718,11 +737,9 @@ class Controller extends ENIP {
 
             // Clear and re-aply timeout
             clearTimeout(this.state.implicit.inputTimer);
-            this._inputTimeout(2000);
+            this._inputTimeout(timeout);
 
             this._processImplicitInput(newData);
-
-            
 
             if (!this.state.implicit.receiving) {
                 // Update receiving state variable so outputs can be sent
@@ -748,7 +765,7 @@ class Controller extends ENIP {
         this.state.implicit.inputTimer = setTimeout(() => {
             console.debug("Implicit message timeout");
             //TODO: Reconnect handling
-            //this.connect(this.ip_address)
+            //this.connect(this.state.ip_address)
 
         }, timeout);
     }
@@ -795,7 +812,7 @@ class Controller extends ENIP {
         // Raw output data buffer
         this.state.implicit.rawOutput.copy(buf,24);
 
-        await this.state.implicit.session.send(buf,config.UDP_PORT,this.ip_address);
+        await this.state.implicit.session.send(buf,config.UDP_PORT,this.state.ip_address);
         if (!this.state.implicit.sending) {this.state.implicit.sending = true;}
         //console.debug("Outputs sent!",this.state.implicit.rawOutput.toString("hex"));
         return;
@@ -865,8 +882,10 @@ class Controller extends ENIP {
 
             console.debug(`${inputItem.Name} updated to: ${inputItem.Value}`);
 
-            // Emit event for listeners of this parameter (use controller.on)
-            this.emit(inputItem.Name, inputItem.Value);
+            // Emit event for listeners of this parameter
+            if (inputItem.tag) {
+                inputItem.tag.changed(inputItem.Value);
+            }
 
             // Update state input
             this.state.inputs[inputIndex] = inputItem;
@@ -964,7 +983,6 @@ class Controller extends ENIP {
         } */
 
         index = this.state.outputs.findIndex(element => element.Name == outputName);
-        console.debug(index);
 
         this._setOutput(index,newValue);
         return;
