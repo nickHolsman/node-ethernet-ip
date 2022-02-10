@@ -111,7 +111,7 @@ class ENIP extends Socket {
         );
 
         // Connect to Controller and Then Send Register Session Packet
-        await promiseTimeout(
+        /* await promiseTimeout(
             new Promise(resolve => {
                 super.connect(
                     EIP_PORT,
@@ -120,6 +120,7 @@ class ENIP extends Socket {
                         this.state.TCP.establishing = false;
                         this.state.TCP.established = true;
 
+                        console.debug("register");
                         this.write(registerSession());
                         resolve();
                     }
@@ -127,7 +128,45 @@ class ENIP extends Socket {
             }),
             10000,
             connectErr
+        ); */
+
+        /////////////
+
+        let connected = false;
+
+        await promiseTimeout(
+            new Promise(async (resolve) => {
+                await super.connect(
+                    EIP_PORT,
+                    IP_ADDR
+                );
+                connected = true;
+                resolve();
+            }),
+            10000,
+            connectErr
         );
+
+        if (connected) {
+            await promiseTimeout(
+                new Promise(resolve => {
+    
+                    this.state.TCP.establishing = false;
+                    this.state.TCP.established = true;
+    
+                    console.debug("register");
+                    this.write(registerSession());
+                    resolve();
+    
+                }),
+                10000,
+                connectErr
+            );
+        }
+
+        
+
+        //////////////
 
         const sessionErr = new Error(
             "TIMEOUT occurred while attempting to establish Ethernet/IP session with Controller."
@@ -196,13 +235,14 @@ class ENIP extends Socket {
      * @param {Exception} exception - Gets passed to 'error' event handler
      * @memberof ENIP
      */
-    destroy(exception) {
+    /* destroy(exception) {
         const { unregisterSession } = encapsulation;
         this.write(unregisterSession(this.state.session.id), () => {
             this.state.session.established = false;
             super.destroy(exception);
         });
-    }
+        super.end();
+    } */
     // endregion
 
     // region Private Method Definitions
@@ -296,7 +336,7 @@ class ENIP extends Socket {
     _handleCloseEvent(hadError) {
         this.state.session.established = false;
         this.state.TCP.established = false;
-        if (hadError) throw new Error("Socket Transmission Failure Occurred!");
+        //if (hadError) throw new Error("Socket Transmission Failure Occurred!");
     }
     // endregion
 }

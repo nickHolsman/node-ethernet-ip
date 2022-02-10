@@ -19,7 +19,6 @@ const readEDS = async (file_path) => {
     let promise = new Promise(function(resolve, reject){
         fs.readFile(file_path, "ascii", (err, data) => {
             let regex = /\[|\]/gm;
-            console.log("started");
     
             // Remove comments and split by [ or ]
             let array = data.replace(/\$.*/gm,"").split(regex);

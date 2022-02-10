@@ -129,6 +129,7 @@ class Controller extends ENIP {
      *
      * @override
      * @param {string} IP_ADDR - IPv4 Address (can also accept a FQDN, provided port forwarding is configured correctly.)
+     * @param {*} EDS_LOCATION - location of EDS file for parsing
      * @param {number} SLOT - Controller Slot Number (0 if CompactLogix)
      * @returns {Promise}
      * @memberof ENIP
@@ -138,7 +139,7 @@ class Controller extends ENIP {
         const BACKPLANE = 1;
 
         // If EDS file is supplied, parse it
-        if (EDS_LOCATION != 0) {
+        if (EDS_LOCATION != 0 && !this.EDS) {
             //TODO: check EDS file exists
             this._initializeEDS(EDS_LOCATION);
         }
@@ -324,7 +325,19 @@ class Controller extends ENIP {
     async stop_implicit() {
         // Send FORWARD CLOSE request
         // stop UDP server
-        this.state.implicit.session.close();
+        
+        if (this.state.implicit.receiving) {
+            clearTimeout(this.state.implicit.inputTimer);
+            this.state.implicit.session.close();
+        }
+
+        if (this.state.implicit.sending) {
+            ci.clearCorrectingInterval(this.state.implicit.outputInterval);
+        }
+        
+        this.state.implicit.connected = false;
+        this.state.implicit.receiving = false;
+        this.state.implicit.sending = false;
         return;
     }
 
@@ -693,19 +706,20 @@ class Controller extends ENIP {
         console.info("Connecting Implicit IO via UDP...");
 
         // emits when any error occurs
-        this.state.implicit.session.on("error", function (error) {
-            console.info("Implicit IO Server Error: " + error);
+        /* this.state.implicit.session.on("error", function (error) {
+            console.info("Implicit IO Server error");
+            ci.clearCorrectingInterval(this.state.implicit.outputInterval);
             this.state.implicit.connected = false;
             this.state.implicit.receiving = false;
             this.state.implicit.sending = false;
             this.state.implicit.session.close();
-        });
+            //this.emit('error')
+        }); */
 
         this.state.implicit.session.on("close", () => {
             console.info("Implicit IO Server Closed");
-            this.state.implicit.connected = false;
-            this.state.implicit.receiving = false;
-            this.state.implicit.sending = false;
+            this.stop_implicit();
+            //this.emit('error');
         });
 
         this.state.implicit.session.on("listening", () => {
@@ -764,6 +778,7 @@ class Controller extends ENIP {
     async _inputTimeout(timeout = 2000) {
         this.state.implicit.inputTimer = setTimeout(() => {
             console.debug("Implicit message timeout");
+            this.stop_implicit();
             //TODO: Reconnect handling
             //this.connect(this.state.ip_address)
 
@@ -917,7 +932,7 @@ class Controller extends ENIP {
         switch (this.state.outputs[outputIndex].Type) {
             case SINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
                 }
                 this.state.implicit.rawOutput.writeInt8(newValue,bufferIndex);
                 // Update state output
@@ -925,7 +940,7 @@ class Controller extends ENIP {
                 break;
             case INT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
                 }
                 this.state.implicit.rawOutput.writeInt16LE(newValue,bufferIndex);
                 // Update state output
@@ -933,7 +948,7 @@ class Controller extends ENIP {
                 break;
             case DINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
                 }
                 this.state.implicit.rawOutput.writeInt32LE(newValue,bufferIndex);
                 // Update state output
@@ -941,7 +956,7 @@ class Controller extends ENIP {
                 break;
             case UDINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
                 }
                 this.state.implicit.rawOutput.writeUInt32LE(newValue,bufferIndex);
                 // Update state output
@@ -949,7 +964,7 @@ class Controller extends ENIP {
                 break;
             case REAL:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type)
+                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
                 }
                 this.state.implicit.rawOutput.writeFloatLE(newValue,bufferIndex);
                 // Update state output
