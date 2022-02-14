@@ -18,7 +18,14 @@ const readEDS = async (file_path) => {
 
     let promise = new Promise(function(resolve, reject){
         fs.readFile(file_path, "ascii", (err, data) => {
+
+            // Guard clause for EDS file
+            if (!data) {
+                throw new Error("EDS file not found");
+            }
+            
             let regex = /\[|\]/gm;
+            
     
             // Remove comments and split by [ or ]
             let array = data.replace(/\$.*/gm,"").split(regex);
