@@ -154,7 +154,6 @@ class ENIP extends Socket {
                     this.state.TCP.establishing = false;
                     this.state.TCP.established = true;
     
-                    console.debug("register");
                     this.write(registerSession());
                     resolve();
     
