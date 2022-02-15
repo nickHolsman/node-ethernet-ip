@@ -735,7 +735,7 @@ class Controller extends ENIP {
         this.state.implicit.session.on("message", async (msg, rinfo) => {
             //TODO: convert to streams
             //console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}: ${msg.toString("hex")}`);
-            console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}`);
+            //console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}`);
 
             if (!this.state.implicit.receiving) {
                 // Update state variables for tracking
