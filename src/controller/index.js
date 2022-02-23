@@ -887,7 +887,7 @@ class Controller extends ENIP {
                     new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
                     console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
 
-                    inputItem = this._assignBitString(inputItem);
+                    //inputItem = this._assignBitString(inputItem);
 
                     console.debug(inputItem);
                     break;
