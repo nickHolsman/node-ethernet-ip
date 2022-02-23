@@ -248,9 +248,14 @@ class Controller extends ENIP {
                     tag: []
                 };
             }
-            // If bit string then allocate size
-            if (currentParam.Type == BIT_STRING) {
-                currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+            // If bit string then allocate bit and tag arrays
+            if (currentParam.Type === BIT_STRING) {
+                //currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+                // Initialize array with all zeros
+                currentParam.Value = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return 0; });
+
+                // Initialize array with empty arrays
+                currentParam.tag = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return []; });
             }
 
             bufferIndex += currentParam.ByteSize;
@@ -286,7 +291,7 @@ class Controller extends ENIP {
                     Name: "Padding",
                     Value: null,
                     Index: bufferIndex,
-                    pairedOutputIndex: null,
+                    //pairedOutputIndex: null,
                     tag: []
                 };
             }
@@ -294,7 +299,7 @@ class Controller extends ENIP {
                 let paramData = params.find(x => x.Param == element.Param);
                 let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
                 // Check if this parameter name exists on outputs, if so mark it as such
-                let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name == paramName);
+                //let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name == paramName);
 
                 currentParam = {
                     Param: element.Param,
@@ -303,13 +308,18 @@ class Controller extends ENIP {
                     Name: paramName,
                     Value: null,
                     Index: bufferIndex,
-                    pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null,
+                    //pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null,
                     tag: []
                 };
             }
-            // If bit string then allocate size
-            if (currentParam.Type == BIT_STRING) {
-                currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+            // If bit string then allocate bit and tag arrays
+            if (currentParam.Type === BIT_STRING) {
+                //currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
+                // Initialize array with all zeros
+                currentParam.Value = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return 0; });
+
+                // Initialize array with empty arrays
+                currentParam.tag = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return []; });
             }
 
             bufferIndex += currentParam.ByteSize;
@@ -887,7 +897,7 @@ class Controller extends ENIP {
                     new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
                     console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
 
-                    //inputItem = this._assignBitString(inputItem);
+                    inputItem = this._assignBitString(inputItem,new_data, pair[0], pair[0] + inputItem.ByteSize);
 
                     console.debug(inputItem);
                     break;
@@ -910,7 +920,7 @@ class Controller extends ENIP {
 
             // Emit event for listeners of this parameter
             if (inputItem.tag.length > 0) {
-                if (inputItem.Type == BIT_STRING) {
+                if (inputItem.Type === BIT_STRING) {
                     // cycle through for changes
                 }
 
@@ -925,9 +935,11 @@ class Controller extends ENIP {
             this.state.inputs[inputIndex] = inputItem;
 
             // Update paired output if exists
-            if (inputItem.pairedOutputIndex !== null) {
+            // Commenting this out, this may be harmful as there are typically masks in place
+            // for protection of these values
+            /* if (inputItem.pairedOutputIndex !== null) {
                 this._setOutput(inputItem.pairedOutputIndex,inputItem.Value);
-            }
+            } */
             //console.debug(inputItem.ByteSize);
         }
 
@@ -936,14 +948,20 @@ class Controller extends ENIP {
         return;
     }
 
-    _assignBitString(inputItem) {
+    _assignBitString(item, buffer, start, end) {
+        let buf = Buffer.alloc(item.ByteSize);
+        buffer.copy(buf, 0, start, end);
+
         // Break out values in bit array
-        let bs = new BitSet(inputItem.Value.toString("hex"));
-        for (let b of bs) {
-            inputItem.BitArray.push(b);
-            console.log(b);
+        let bs = new BitSet(buf);
+
+        for (let index = 0; index < item.ByteSize*8; index++) {
+            item.Value[index] = bs.get(index);
+            //console.log(bs.get(index));
+            
         }
-        return inputItem;
+
+        return item;
     }
 
     _setOutput(outputIndex,newValue) {
