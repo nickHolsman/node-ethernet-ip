@@ -9,6 +9,7 @@ const { readEDS } = require("../eds-parser");
 const { Types } = require("../enip/cip/data-types");
 const { SINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
 const ci = require("correcting-interval");
+const BitSet = require("bitset");
 
 const compare = (obj1, obj2) => {
     if (obj1.priority > obj2.priority) return true;
@@ -229,7 +230,8 @@ class Controller extends ENIP {
                     Type: null,
                     Name: "Padding",
                     Value: null,
-                    Index: bufferIndex
+                    Index: bufferIndex,
+                    tag: []
                 };
             }
             else {
@@ -242,7 +244,8 @@ class Controller extends ENIP {
                     Type: Number(paramData.Data.DataType),
                     Name: paramName,
                     Value: null,
-                    Index: bufferIndex
+                    Index: bufferIndex,
+                    tag: []
                 };
             }
             // If bit string then allocate size
@@ -283,7 +286,8 @@ class Controller extends ENIP {
                     Name: "Padding",
                     Value: null,
                     Index: bufferIndex,
-                    pairedOutputIndex: null
+                    pairedOutputIndex: null,
+                    tag: []
                 };
             }
             else {
@@ -299,7 +303,8 @@ class Controller extends ENIP {
                     Name: paramName,
                     Value: null,
                     Index: bufferIndex,
-                    pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null
+                    pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null,
+                    tag: []
                 };
             }
             // If bit string then allocate size
@@ -523,14 +528,15 @@ class Controller extends ENIP {
         if (isInput) {
             let inputIndex = this.state.inputs.findIndex(element => element.Name == tag.name);
             let input = this.state.inputs[inputIndex];
-            input.tag = tag;
+            input.tag.push(tag);
             this.state.inputs[inputIndex] = input;
         }
 
         if (isOutput) {
             let outputIndex = this.state.outputs.findIndex(element => element.Name == tag.name);
             let output = this.state.outputs[outputIndex];
-            output.tag = tag;
+            output.tag.push(tag);
+            this.state.outputs[outputIndex] = output;
         }
     }
 
@@ -732,7 +738,7 @@ class Controller extends ENIP {
 
         });
 
-        this.state.implicit.session.on("message", async (msg, rinfo) => {
+        this.state.implicit.session.on("message", async (msg) => {
             //TODO: convert to streams
             //console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}: ${msg.toString("hex")}`);
             //console.info(`Implicit IO Message from ${rinfo.address}:${rinfo.port}`);
@@ -843,6 +849,7 @@ class Controller extends ENIP {
         let dataIndex = 0;
 
         // Check which inputs changed, update the state parameters, and emit events for each that changed
+        // Formatting for each pair is [index, byte]
         for (const pair of new_data.entries()) {
 
             // Compare to dataIndex, used to skip ahead to the next data once size is known
@@ -878,7 +885,11 @@ class Controller extends ENIP {
                     break;
                 case BIT_STRING:
                     new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
-                    //console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
+                    console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
+
+                    inputItem = this._assignBitString(inputItem);
+
+                    console.debug(inputItem);
                     break;
                 case BOOL:
                     inputItem.Value = new_data.readUInt8(pair[0]) !== 0;
@@ -898,8 +909,16 @@ class Controller extends ENIP {
             console.debug(`${inputItem.Name} updated to: ${inputItem.Value}`);
 
             // Emit event for listeners of this parameter
-            if (inputItem.tag) {
-                inputItem.tag.changed(inputItem.Value);
+            if (inputItem.tag.length > 0) {
+                if (inputItem.Type == BIT_STRING) {
+                    // cycle through for changes
+                }
+
+                // emit any events for the change
+                inputItem.tag.forEach((item) => {
+                    item.changed(inputItem.Value);
+                });
+                
             }
 
             // Update state input
@@ -915,6 +934,16 @@ class Controller extends ENIP {
         // Copy new data to rawinput buffer
         new_data.copy(this.state.implicit.rawInput, 0, 0);
         return;
+    }
+
+    _assignBitString(inputItem) {
+        // Break out values in bit array
+        let bs = new BitSet(inputItem.Value.toString("hex"));
+        for (let b of bs) {
+            inputItem.BitArray.push(b);
+            console.log(b);
+        }
+        return inputItem;
     }
 
     _setOutput(outputIndex,newValue) {
