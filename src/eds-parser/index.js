@@ -21,7 +21,7 @@ const readEDS = async (file_path) => {
 
             // Guard clause for EDS file
             if (!data) {
-                throw new Error("EDS file not found");
+                reject("EDS file not found");
             }
             
             let regex = /\[|\]/gm;

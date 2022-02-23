@@ -29,7 +29,8 @@ class Param extends EventEmitter {
         // assign tag info to param
         this.controller.addTag(this,this.isInput,this.isOutput);
         
-        instances++;
+        // Increment Instances
+        instances += 1;
     }
 
     update(value) {
