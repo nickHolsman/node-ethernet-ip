@@ -255,18 +255,19 @@ const parseParamsItem = (data) => {
 
 const parseEnumItem = (data) => {
     let array = data.split(/,|;/);
-    let enumData = {};
-    let currentEnum;
+    let enumData = [];
+    let currentEnum = {};
 
     // Split enum contents
     array.forEach((element,index) => {
         let item = element.trim();
         if (index % 2 == 0) {
-            enumData[item] = null;
-            currentEnum = item;
+            currentEnum["index"] = item;
         }
         else {
-            enumData[currentEnum] = item.replace(/"/g,"");
+            currentEnum["value"] = item.replace(/"/g,"");
+            enumData.push(currentEnum);
+            currentEnum = {};
         }
     });
     return enumData;

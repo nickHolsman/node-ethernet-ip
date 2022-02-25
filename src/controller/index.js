@@ -10,6 +10,7 @@ const { Types } = require("../enip/cip/data-types");
 const { SINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
 const ci = require("correcting-interval");
 const BitSet = require("bitset");
+//const structuredClone = require("@ungap/structured-clone");
 
 const compare = (obj1, obj2) => {
     if (obj1.priority > obj2.priority) return true;
@@ -212,17 +213,18 @@ class Controller extends ENIP {
             Index: null
         };
 
-        //
+        /////////////////////////////////////////////////////////////////////////////////
         // Setup outputs for implicit messages
-        //
+        /////////////////////////////////////////////////////////////////////////////////
+        this.state.outputs = [];
         let index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
-
         if (index < 0) {
             throw new Error("Output assembly not found!"); 
         }
-
         let outputAssem = this.EDS.Assembly[index];
-        this.state.outputs = outputAssem.Data.Members.map( (element) => {
+        outputAssem.Data.Members.forEach( (element) => {
+            let paramData;
+            let paramName;
             if (element.Param == "Padding") {
                 currentParam = {
                     Param: element.Param,
@@ -231,42 +233,78 @@ class Controller extends ENIP {
                     Name: "Padding",
                     Value: null,
                     Index: bufferIndex,
+                    //pairedOutputIndex: null,
                     tag: []
                 };
             }
             else {
-                let paramData = params.find(x => x.Param == element.Param);
-                let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
+                paramData = params.find(x => x.Param == element.Param);
+                paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
+                // Check if this parameter name exists on outputs, if so mark it as such
+                //let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name == paramName);
 
                 currentParam = {
                     Param: element.Param,
                     ByteSize: element.Size / 8,
                     Type: Number(paramData.Data.DataType),
                     Name: paramName,
-                    Value: null,
+                    Value: 0,
                     Index: bufferIndex,
+                    //pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null,
                     tag: []
                 };
             }
             // If bit string then allocate bit and tag arrays
             if (currentParam.Type === BIT_STRING) {
-                //currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
-                // Initialize array with all zeros
-                currentParam.Value = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return 0; });
+                currentParam.ParentName = currentParam.Name;
 
-                // Initialize array with empty arrays
-                currentParam.tag = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return []; });
+                // If the bit string has enumerated values,
+                // create an entry for each
+                if (paramData.Enum !== undefined) {
+                    paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
+                        let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
+
+                        let bitSize = currentItem.index - prevItem.index;
+
+                        thisItem.Name = prevItem.value;
+                        thisItem.BitIndex = prevItem.index;
+                        thisItem.BitSize = bitSize; 
+                        this.state.outputs.push(thisItem);
+
+                        // If last item, assume it has the same BitSize as previous
+                        if (currentIndex == paramData.Enum.length - 1) {
+                            thisItem = structuredClone(currentParam);
+                            thisItem.Name = currentItem.value;
+                            thisItem.BitIndex = currentItem.index;
+                            thisItem.BitSize = bitSize;
+                            this.state.outputs.push(thisItem);
+                        }
+                        return currentItem;
+                    });
+                    bufferIndex += currentParam.ByteSize;
+                    return;
+                }
+                for (let i = 0; i < currentParam.ByteSize * 8; i++) {
+                    let thisItem = structuredClone(currentParam);
+                    thisItem.Name = currentParam.ParentName + "_" + i;     //TODO: remove any numbers from name with regex
+                    thisItem.BitIndex = i;
+                    thisItem.BitSize = 1;
+                    this.state.outputs.push(thisItem);
+                }
+                bufferIndex += currentParam.ByteSize;
+                return;
             }
-
             bufferIndex += currentParam.ByteSize;
-            return currentParam;
+            this.state.outputs.push(currentParam);
+            return;
         });
         this.state.implicit.rawOutput = Buffer.alloc(bufferIndex);
 
 
-        //
+        /////////////////////////////////////////////////////////////////////////////////
         // Setup inputs for implicit messages
-        //
+        /////////////////////////////////////////////////////////////////////////////////
+        this.state.inputs = [];
         index = this.EDS.Assembly.findIndex(x => x.Assem == input_assem);
         bufferIndex = 0;
         currentParam = {
@@ -282,7 +320,9 @@ class Controller extends ENIP {
         }
 
         let inputAssem = this.EDS.Assembly[index];
-        this.state.inputs = inputAssem.Data.Members.map( (element) => {
+        inputAssem.Data.Members.forEach( (element) => {
+            let paramData;
+            let paramName;
             if (element.Param == "Padding") {
                 currentParam = {
                     Param: element.Param,
@@ -296,8 +336,8 @@ class Controller extends ENIP {
                 };
             }
             else {
-                let paramData = params.find(x => x.Param == element.Param);
-                let paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
+                paramData = params.find(x => x.Param == element.Param);
+                paramName = paramData.Data.Name.replace(/\s/g, "");  // Remove any whitespace
                 // Check if this parameter name exists on outputs, if so mark it as such
                 //let pairedOutputIndex = this.state.outputs.findIndex(element => element.Name == paramName);
 
@@ -306,26 +346,61 @@ class Controller extends ENIP {
                     ByteSize: element.Size / 8,
                     Type: Number(paramData.Data.DataType),
                     Name: paramName,
-                    Value: null,
+                    Value: 0,
                     Index: bufferIndex,
                     //pairedOutputIndex: (pairedOutputIndex > -1) ? pairedOutputIndex : null,
                     tag: []
                 };
             }
+
             // If bit string then allocate bit and tag arrays
             if (currentParam.Type === BIT_STRING) {
-                //currentParam.Value = Buffer.alloc(currentParam.ByteSize); 
-                // Initialize array with all zeros
-                currentParam.Value = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return 0; });
+                currentParam.ParentName = currentParam.Name;
 
-                // Initialize array with empty arrays
-                currentParam.tag = Array.apply(null, Array(currentParam.ByteSize*8)).map(function () { return []; });
+                // If the bit string has enumerated values,
+                // create an entry for each
+                if (paramData.Enum !== undefined) {
+                    paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
+                        let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
+
+                        let bitSize = currentItem.index - prevItem.index;
+
+                        thisItem.Name = prevItem.value;
+                        thisItem.BitIndex = prevItem.index;
+                        thisItem.BitSize = bitSize;  
+                        this.state.inputs.push(thisItem);
+
+                        // If last item, assume it has the same BitSize as previous
+                        if (currentIndex == paramData.Enum.length - 1) {
+                            thisItem = structuredClone(currentParam);
+                            thisItem.Name = currentItem.value;
+                            thisItem.BitIndex = currentItem.index;
+                            thisItem.BitSize = bitSize;
+                            this.state.inputs.push(thisItem);
+                        }
+                        return currentItem;
+                    });
+                    bufferIndex += currentParam.ByteSize;
+                    return;
+                }
+
+                for (let i = 0; i < currentParam.ByteSize * 8; i++) {
+                    let thisItem = structuredClone(currentParam);
+                    thisItem.Name = currentParam.ParentName + "_" + i;     //TODO: remove any numbers from name with regex
+                    thisItem.BitIndex = i;
+                    thisItem.BitSize = 1;
+                    this.state.inputs.push(thisItem);
+                }
+                bufferIndex += currentParam.ByteSize;
+                return;
             }
-
             bufferIndex += currentParam.ByteSize;
-            return currentParam;
+            this.state.inputs.push(currentParam);
+            return;
         });
-        //this.state.implicit.rawInput = Buffer.alloc(bufferIndex+1);
+
+        //console.info("Available inputs: ", this.state.inputs);
+        //console.info("Available outputs: "", this.state.outputs);
 
         // Schedule the implicit connection
         await this._start_implicit(cycle_time,timeout);
@@ -873,36 +948,101 @@ class Controller extends ENIP {
             if (pair[1] == this.state.implicit.rawInput[pair[0]]) { 
                 dataIndex += inputItem.ByteSize;
                 continue; 
-            }       
+            }  
+
+            // Define block function to use in switch state
+            // Used to update a single input
+            let updateInput = (input, index = null) => {
+                console.debug(`${input.Name} updated to: ${input.Value}`);
+
+                // Emit event for listeners of this parameter
+                if (input.tag.length > 0) {
+
+                    // emit any events for the change
+                    input.tag.forEach((tag) => {
+                        tag.changed(input.Value);
+                    });
+
+                }
+
+                if (index != null) {
+                    // Update state input
+                    this.state.inputs[index] = input;
+                    return;
+                }
+                index = this.state.inputs.findIndex((item) => item.Name == input.Name);
+                this.state.inputs[index] = input;
+                return;
+            };     
 
             // Update value based on data type
             /* eslint-disable indent */
             switch (inputItem.Type) {
                 case SINT:
                     inputItem.Value = new_data.readInt8(pair[0]);
+                    updateInput(inputItem);
                     break;
                 case INT:
                     inputItem.Value = new_data.readInt16LE(pair[0]);
+                    updateInput(inputItem);
                     break;
                 case DINT:
                     inputItem.Value = new_data.readInt32LE(pair[0]);
+                    updateInput(inputItem);
                     break;
                 case UDINT:
                     inputItem.Value = new_data.readUInt32LE(pair[0]);
+                    updateInput(inputItem);
                     break;
                 case REAL:
                     inputItem.Value = new_data.readFloatLE(pair[0]);
+                    updateInput(inputItem);
                     break;
-                case BIT_STRING:
-                    new_data.copy(inputItem.Value, 0, pair[0], pair[0] + inputItem.ByteSize);
-                    console.debug(`bit string value: ${inputItem.Value.toString("hex")}`);
+                case BIT_STRING: {
+                    //let buf = Buffer.alloc(inputItem.ByteSize);
+                    //new_data.copy(buf, 0, pair[0], pair[0] + inputItem.ByteSize);
+                    let bitBuf = new_data.subarray(pair[0], pair[0] + inputItem.ByteSize);
 
-                    inputItem = this._assignBitString(inputItem,new_data, pair[0], pair[0] + inputItem.ByteSize);
+                    // Get all inputs relevant to this Byte index (parent name)
+                    let inputItems = this.state.inputs.filter((input) => input.ParentName == inputItem.ParentName);
+                    inputItems.sort((a,b) => a.BitIndex - b.BitIndex);    //Sort it ascending order
 
-                    console.debug(inputItem);
+                    inputItems.forEach((input) => {
+
+                        let oldValue = input.Value;
+
+                        switch (input.BitSize) {
+                            
+                            case 1:
+                                // If boolean (bit size == 1) then just assign the index value
+                                //input.Value = input.bitString.get(input.BitIndex);
+                                input.Value = (bitBuf.readInt32LE() & (1 << input.BitIndex)) == 0 ? false : true;
+                                break;
+                            case 8:
+                                input.Value = bitBuf.readInt8(input.BitIndex);
+                                break;
+                            case 16:
+                                input.Value = bitBuf.readInt16LE(input.BitIndex);
+                                break;
+                            default:
+                                throw new Error(
+                                    `Bit Parsing error: ${input}`
+                                );
+                        }
+
+                        // If value updated, report it
+                        if (input.Value != oldValue) {
+                            updateInput(input);
+                        }
+                        
+                        return;
+                    });
+
                     break;
+                }
                 case BOOL:
                     inputItem.Value = new_data.readUInt8(pair[0]) !== 0;
+                    updateInput(inputItem);
                     break;
                 case null:
                     break;
@@ -916,52 +1056,17 @@ class Controller extends ENIP {
             // add to index
             dataIndex += inputItem.ByteSize;
 
-            console.debug(`${inputItem.Name} updated to: ${inputItem.Value}`);
-
-            // Emit event for listeners of this parameter
-            if (inputItem.tag.length > 0) {
-                if (inputItem.Type === BIT_STRING) {
-                    // cycle through for changes
-                }
-
-                // emit any events for the change
-                inputItem.tag.forEach((item) => {
-                    item.changed(inputItem.Value);
-                });
-                
-            }
-
-            // Update state input
-            this.state.inputs[inputIndex] = inputItem;
-
             // Update paired output if exists
             // Commenting this out, this may be harmful as there are typically masks in place
             // for protection of these values
             /* if (inputItem.pairedOutputIndex !== null) {
                 this._setOutput(inputItem.pairedOutputIndex,inputItem.Value);
             } */
-            //console.debug(inputItem.ByteSize);
         }
 
         // Copy new data to rawinput buffer
         new_data.copy(this.state.implicit.rawInput, 0, 0);
         return;
-    }
-
-    _assignBitString(item, buffer, start, end) {
-        let buf = Buffer.alloc(item.ByteSize);
-        buffer.copy(buf, 0, start, end);
-
-        // Break out values in bit array
-        let bs = new BitSet(buf);
-
-        for (let index = 0; index < item.ByteSize*8; index++) {
-            item.Value[index] = bs.get(index);
-            //console.log(bs.get(index));
-            
-        }
-
-        return item;
     }
 
     _setOutput(outputIndex,newValue) {
@@ -971,65 +1076,89 @@ class Controller extends ENIP {
             throw new Error(`Output index must be of type number, received: ${outputIndex}`);
         }
 
+        let outputItem = this.state.outputs[outputIndex];
+
         // Find buffer index
-        let bufferIndex = this.state.outputs[outputIndex].Index;
+        let bufferIndex = outputItem.Index;
 
         // Update raw buffer and state output
         /* eslint-disable indent */
-        switch (this.state.outputs[outputIndex].Type) {
+        switch (outputItem.Type) {
             case SINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeInt8(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
             case INT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeInt16LE(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
             case DINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeInt32LE(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
             case UDINT:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeUInt32LE(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
             case REAL:
                 if (typeof newValue !== "number") {
-                    throw new Error("Value must be given as a number for type: ", this.state.outputs[outputIndex].Type);
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeFloatLE(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
-            case BIT_STRING:
+            case BIT_STRING: {
+                // Store this section of raw buffer to manipulate and eventually return
+                let buf = this.state.implicit.rawOutput.readInt32LE(outputItem.Index);
+
+                switch (outputItem.BitSize) {
+                    case 1: {
+                        let newBuf = null;
+                        // Set value depending on if true (and mask) or false (or mask)
+                        newBuf.writeInt32LE(newValue ? buf & (1 << outputItem.BitIndex) : buf & ~(1 << outputItem.BitIndex));
+                        break;
+                    }
+                    case 8: 
+                        buf.writeInt8(outputItem.BitIndex);
+                        break;
+                    case 16:
+                        buf.writeInt16LE(outputItem.BitIndex);
+                        break;
+                    default:
+                        throw new Error(
+                            `Bit Parsing error: ${outputItem}`
+                        );
+                }
+
                 // Update state output
-                newValue.copy(this.state.outputs[outputIndex].Value);
-                newValue.copy(this.state.implicit.rawOutput,bufferIndex);
+                buf.copy(this.state.implicit.rawOutput, bufferIndex);
                 break;
+            }
             case BOOL:
                 this.state.implicit.rawOutput.writeUInt8(newValue,bufferIndex);
                 // Update state output
-                this.state.outputs[outputIndex].Value = newValue;
+                outputItem.Value = newValue;
                 break;
             default:
                 throw new Error(
-                    `Unrecognized Type Passed: ${this.state.outputs[outputIndex].Type}`
+                    `Unrecognized Type Passed: ${outputItem.Type}`
                 );
         }
         /* eslint-enable indent */
