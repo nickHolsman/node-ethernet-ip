@@ -948,7 +948,7 @@ class Controller extends ENIP {
         // Define block function to use in switch state
         // Used to update a single input
         let updateInput = (input) => {
-            console.debug(`${input.Name} updated to: ${input.Value}`);
+            //console.debug(`${input.Name} updated to: ${input.Value}`);
             // Emit event for listeners of this parameter
             if (input.tag.length > 0) {
                 // emit any events for the change
