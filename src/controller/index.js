@@ -1115,7 +1115,7 @@ class Controller extends ENIP {
                 break;
             case BIT_STRING: {
                 // Store this section of raw buffer to manipulate and eventually return
-                let buf = this.state.implicit.rawOutput.subarray(outputItem.Index,outputItem.ByteSize);
+                let buf = this.state.implicit.rawOutput.subarray(outputItem.Index,outputItem.Index + outputItem.ByteSize);
 
                 switch (outputItem.BitSize) {
                     case 1: {
