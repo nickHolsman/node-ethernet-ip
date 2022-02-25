@@ -217,7 +217,7 @@ class Controller extends ENIP {
         // Setup outputs for implicit messages
         /////////////////////////////////////////////////////////////////////////////////
         this.state.outputs = [];
-        let index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);
+        let index = this.EDS.Assembly.findIndex(x => x.Assem == output_assem);  //Find index of output assem
         if (index < 0) {
             throw new Error("Output assembly not found!"); 
         }
@@ -261,11 +261,18 @@ class Controller extends ENIP {
                 // If the bit string has enumerated values,
                 // create an entry for each
                 if (paramData.Enum !== undefined) {
+                    if (paramData.Enum.length == 1) {
+                        let currentItem = paramData.Enum[0];
+                        let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
+                        let bitSize = element.Size;
+                        thisItem.Name = currentItem.value;
+                        thisItem.BitIndex = currentItem.index;
+                        thisItem.BitSize = bitSize; 
+                        this.state.outputs.push(thisItem);
+                    }
                     paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
-
                         let bitSize = currentItem.index - prevItem.index;
-
                         thisItem.Name = prevItem.value;
                         thisItem.BitIndex = prevItem.index;
                         thisItem.BitSize = bitSize; 
@@ -360,11 +367,18 @@ class Controller extends ENIP {
                 // If the bit string has enumerated values,
                 // create an entry for each
                 if (paramData.Enum !== undefined) {
+                    if (paramData.Enum.length == 1) {
+                        let currentItem = paramData.Enum[0];
+                        let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
+                        let bitSize = element.Size;
+                        thisItem.Name = currentItem.value;
+                        thisItem.BitIndex = currentItem.index;
+                        thisItem.BitSize = bitSize; 
+                        this.state.outputs.push(thisItem);
+                    }
                     paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
-
                         let bitSize = currentItem.index - prevItem.index;
-
                         thisItem.Name = prevItem.value;
                         thisItem.BitIndex = prevItem.index;
                         thisItem.BitSize = bitSize;  
@@ -400,7 +414,7 @@ class Controller extends ENIP {
         });
 
         //console.info("Available inputs: ", this.state.inputs);
-        //console.info("Available outputs: "", this.state.outputs);
+        //console.info("Available outputs: ", this.state.outputs);
 
         // Schedule the implicit connection
         await this._start_implicit(cycle_time,timeout);
