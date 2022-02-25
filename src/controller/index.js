@@ -7,7 +7,7 @@ const dgram =require("dgram");
 const config = require("../config");
 const { readEDS } = require("../eds-parser");
 const { Types } = require("../enip/cip/data-types");
-const { SINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
+const { SINT, UINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
 const ci = require("correcting-interval");
 const BitSet = require("bitset");
 //const structuredClone = require("@ungap/structured-clone");
@@ -945,120 +945,95 @@ class Controller extends ENIP {
             return; 
         }
 
-        let dataIndex = 0;
+        // Define block function to use in switch state
+        // Used to update a single input
+        let updateInput = (input) => {
+            console.debug(`${input.Name} updated to: ${input.Value}`);
+            // Emit event for listeners of this parameter
+            if (input.tag.length > 0) {
+                // emit any events for the change
+                input.tag.forEach((tag) => {
+                    tag.changed(input.Value);
+                });
+            }
+            return;
+        };  
 
-        // Check which inputs changed, update the state parameters, and emit events for each that changed
-        // Formatting for each pair is [index, byte]
-        for (const pair of new_data.entries()) {
-
-            // Compare to dataIndex, used to skip ahead to the next data once size is known
-            if (pair[0] != dataIndex) { continue;}
-
-            // Find corresponding parameter for given buffer index and update
-            let inputIndex = this.state.inputs.findIndex((element) => element.Index == pair[0]);
-            let inputItem = this.state.inputs[inputIndex];
-
-            // Test if new data is different from last
-            if (pair[1] == this.state.implicit.rawInput[pair[0]]) { 
-                dataIndex += inputItem.ByteSize;
-                continue; 
-            }  
-
-            // Define block function to use in switch state
-            // Used to update a single input
-            let updateInput = (input, index = null) => {
-                console.debug(`${input.Name} updated to: ${input.Value}`);
-
-                // Emit event for listeners of this parameter
-                if (input.tag.length > 0) {
-
-                    // emit any events for the change
-                    input.tag.forEach((tag) => {
-                        tag.changed(input.Value);
-                    });
-
-                }
-
-                if (index != null) {
-                    // Update state input
-                    this.state.inputs[index] = input;
-                    return;
-                }
-                index = this.state.inputs.findIndex((item) => item.Name == input.Name);
-                this.state.inputs[index] = input;
-                return;
-            };     
+        this.state.inputs.forEach((inputItem) => {
 
             // Update value based on data type
             /* eslint-disable indent */
             switch (inputItem.Type) {
                 case SINT:
-                    inputItem.Value = new_data.readInt8(pair[0]);
-                    updateInput(inputItem);
+                    inputItem.Value = new_data.readInt8(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readInt8(inputItem.Index)) updateInput(inputItem);
+                    break;
+                case UINT:
+                    inputItem.Value = new_data.readUInt8(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readUInt8(inputItem.Index)) updateInput(inputItem);
                     break;
                 case INT:
-                    inputItem.Value = new_data.readInt16LE(pair[0]);
-                    updateInput(inputItem);
+                    inputItem.Value = new_data.readInt16LE(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readInt16LE(inputItem.Index)) updateInput(inputItem);
                     break;
                 case DINT:
-                    inputItem.Value = new_data.readInt32LE(pair[0]);
-                    updateInput(inputItem);
+                    inputItem.Value = new_data.readInt32LE(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readInt32LE(inputItem.Index)) updateInput(inputItem);
                     break;
                 case UDINT:
-                    inputItem.Value = new_data.readUInt32LE(pair[0]);
-                    updateInput(inputItem);
+                    inputItem.Value = new_data.readUInt32LE(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readUInt32LE(inputItem.Index)) updateInput(inputItem);
                     break;
                 case REAL:
-                    inputItem.Value = new_data.readFloatLE(pair[0]);
-                    updateInput(inputItem);
+                    inputItem.Value = new_data.readFloatLE(inputItem.Index);
+                    // Check if new data matches old from raw input buffer
+                    if (inputItem.Value != this.state.implicit.rawInput.readFloatLE(inputItem.Index)) updateInput(inputItem);
                     break;
                 case BIT_STRING: {
-                    //let buf = Buffer.alloc(inputItem.ByteSize);
-                    //new_data.copy(buf, 0, pair[0], pair[0] + inputItem.ByteSize);
-                    let bitBuf = new_data.subarray(pair[0], pair[0] + inputItem.ByteSize);
+                    // Store this bitstring data from new and old buffers 
+                    let newBuf = new_data.subarray(inputItem.Index, inputItem.Index + inputItem.ByteSize);
+                    let oldBuf = this.state.implicit.rawInput.subarray(inputItem.Index, inputItem.Index + inputItem.ByteSize);
 
-                    // Get all inputs relevant to this Byte index (parent name)
-                    let inputItems = this.state.inputs.filter((input) => input.ParentName == inputItem.ParentName);
-                    inputItems.sort((a,b) => a.BitIndex - b.BitIndex);    //Sort it ascending order
+                    // skip if new equal to old
+                    if (newBuf.equals(oldBuf)) break;
 
-                    inputItems.forEach((input) => {
+                    let oldValue = inputItem.Value;
 
-                        let oldValue = input.Value;
+                    switch (inputItem.BitSize) {
+                        case 1:
+                            // If boolean (bit size == 1) then just assign the index value
+                            inputItem.Value = (newBuf.readInt32LE() & (1 << inputItem.BitIndex)) == 0 ? 0 : 1;
+                            break;
+                        case 8:
+                            inputItem.Value = newBuf.readInt8(inputItem.BitIndex / 8);
+                            break;
+                        case 16:
+                            inputItem.Value = newBuf.readInt16LE(inputItem.BitIndex / 8);
+                            break;
+                        default:
+                            throw new Error(
+                                `Bit Parsing error: ${inputItem}`
+                            );
+                    }
 
-                        switch (input.BitSize) {
-                            
-                            case 1:
-                                // If boolean (bit size == 1) then just assign the index value
-                                //input.Value = input.bitString.get(input.BitIndex);
-                                input.Value = (bitBuf.readInt32LE() & (1 << input.BitIndex)) == 0 ? false : true;
-                                break;
-                            case 8:
-                                input.Value = bitBuf.readInt8(input.BitIndex);
-                                break;
-                            case 16:
-                                input.Value = bitBuf.readInt16LE(input.BitIndex);
-                                break;
-                            default:
-                                throw new Error(
-                                    `Bit Parsing error: ${input}`
-                                );
-                        }
-
-                        // If value updated, report it
-                        if (input.Value != oldValue) {
-                            updateInput(input);
-                        }
-                        
-                        return;
-                    });
+                    // If value updated, report it
+                    if (inputItem.Value != oldValue) {
+                        updateInput(inputItem);
+                    }
 
                     break;
                 }
                 case BOOL:
-                    inputItem.Value = new_data.readUInt8(pair[0]) !== 0;
+                    inputItem.Value = new_data.readUInt8(inputItem.Index) !== 0;
                     updateInput(inputItem);
                     break;
                 case null:
+                    // 
                     break;
                 default:
                     throw new Error(
@@ -1067,16 +1042,8 @@ class Controller extends ENIP {
             }
             /* eslint-enable indent */
 
-            // add to index
-            dataIndex += inputItem.ByteSize;
-
-            // Update paired output if exists
-            // Commenting this out, this may be harmful as there are typically masks in place
-            // for protection of these values
-            /* if (inputItem.pairedOutputIndex !== null) {
-                this._setOutput(inputItem.pairedOutputIndex,inputItem.Value);
-            } */
-        }
+            return;
+        });
 
         // Copy new data to rawinput buffer
         new_data.copy(this.state.implicit.rawInput, 0, 0);
@@ -1103,6 +1070,14 @@ class Controller extends ENIP {
                     throw new Error("Value must be given as a number for type: ", outputItem.Type);
                 }
                 this.state.implicit.rawOutput.writeInt8(newValue,bufferIndex);
+                // Update state output
+                outputItem.Value = newValue;
+                break;
+            case UINT:
+                if (typeof newValue !== "number") {
+                    throw new Error("Value must be given as a number for type: ", outputItem.Type);
+                }
+                this.state.implicit.rawOutput.writeUInt8(newValue, bufferIndex);
                 // Update state output
                 outputItem.Value = newValue;
                 break;
