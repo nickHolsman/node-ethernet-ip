@@ -1119,7 +1119,7 @@ class Controller extends ENIP {
 
                 switch (outputItem.BitSize) {
                     case 1: {
-                        let newBuf = null;
+                        let newBuf = Buffer.alloc(4);
                         let val = this.state.implicit.rawOutput.readInt32LE(outputItem.Index);
                         // Set value depending on if true (and mask) or false (or mask)
                         newBuf.writeInt32LE(newValue ? val & (1 << outputItem.BitIndex) : val & ~(1 << outputItem.BitIndex));
