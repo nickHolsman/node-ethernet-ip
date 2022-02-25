@@ -1140,13 +1140,14 @@ class Controller extends ENIP {
                 break;
             case BIT_STRING: {
                 // Store this section of raw buffer to manipulate and eventually return
-                let buf = this.state.implicit.rawOutput.readInt32LE(outputItem.Index);
+                let buf = this.state.implicit.rawOutput.subarray(outputItem.Index,outputItem.ByteSize);
 
                 switch (outputItem.BitSize) {
                     case 1: {
                         let newBuf = null;
+                        let val = this.state.implicit.rawOutput.readInt32LE(outputItem.Index);
                         // Set value depending on if true (and mask) or false (or mask)
-                        newBuf.writeInt32LE(newValue ? buf & (1 << outputItem.BitIndex) : buf & ~(1 << outputItem.BitIndex));
+                        newBuf.writeInt32LE(newValue ? val & (1 << outputItem.BitIndex) : val & ~(1 << outputItem.BitIndex));
                         break;
                     }
                     case 8: 
