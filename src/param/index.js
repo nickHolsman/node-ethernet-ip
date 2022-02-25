@@ -17,14 +17,17 @@ class Param extends EventEmitter {
         this.controller = controller;
         
         // find param on controller
-        let paramIndex = this.controller.EDS.Params.findIndex(element => element.Data.Name == paramName);
-        if (paramIndex == -1) throw new Error(`Parameter ${paramName} not found!`);
+        /* let paramIndex = this.controller.EDS.Params.findIndex(element => element.Data.Name == paramName);
+        if (paramIndex == -1) throw new Error(`Parameter ${paramName} not found!`); */
 
         // Determine if input/output
         let inputIndex = this.controller.state.inputs.findIndex(element => element.Name == this.name);
         let outputIndex = this.controller.state.outputs.findIndex(element => element.Name == this.name);
         if (outputIndex > -1) this.isOutput = true;
         if (inputIndex > -1) this.isInput = true;
+        if (outputIndex == -1 && inputIndex == -1) {
+            throw new Error(`Parameter ${paramName} not found!`);
+        }
 
         // assign tag info to param
         this.controller.addTag(this,this.isInput,this.isOutput);
