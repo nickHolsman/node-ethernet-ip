@@ -266,24 +266,24 @@ class Controller extends ENIP {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
                         let bitSize = element.Size;
                         thisItem.Name = currentItem.value;
-                        thisItem.BitIndex = currentItem.index;
-                        thisItem.BitSize = bitSize; 
+                        thisItem.BitIndex = parseInt(currentItem.index,10);
+                        thisItem.BitSize = parseInt(bitSize,10); 
                         this.state.outputs.push(thisItem);
                     }
                     paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
                         let bitSize = currentItem.index - prevItem.index;
                         thisItem.Name = prevItem.value;
-                        thisItem.BitIndex = prevItem.index;
-                        thisItem.BitSize = bitSize; 
+                        thisItem.BitIndex = parseInt(prevItem.index,10);
+                        thisItem.BitSize = parseInt(bitSize,10); 
                         this.state.outputs.push(thisItem);
 
                         // If last item, assume it has the same BitSize as previous
                         if (currentIndex == paramData.Enum.length - 1) {
                             thisItem = structuredClone(currentParam);
                             thisItem.Name = currentItem.value;
-                            thisItem.BitIndex = currentItem.index;
-                            thisItem.BitSize = bitSize;
+                            thisItem.BitIndex = parseInt(currentItem.index,10);
+                            thisItem.BitSize = parseInt(bitSize,10);
                             this.state.outputs.push(thisItem);
                         }
                         return currentItem;
@@ -372,24 +372,24 @@ class Controller extends ENIP {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
                         let bitSize = element.Size;
                         thisItem.Name = currentItem.value;
-                        thisItem.BitIndex = currentItem.index;
-                        thisItem.BitSize = bitSize; 
+                        thisItem.BitIndex = parseInt(currentItem.index,10);
+                        thisItem.BitSize = parseInt(bitSize,10); 
                         this.state.outputs.push(thisItem);
                     }
                     paramData.Enum.reduce((prevItem,currentItem,currentIndex) => {
                         let thisItem = structuredClone(currentParam);   //Using structured clone to remove reference to origin object
                         let bitSize = currentItem.index - prevItem.index;
                         thisItem.Name = prevItem.value;
-                        thisItem.BitIndex = prevItem.index;
-                        thisItem.BitSize = bitSize;  
+                        thisItem.BitIndex = parseInt(prevItem.index,10);
+                        thisItem.BitSize = parseInt(bitSize,10);  
                         this.state.inputs.push(thisItem);
 
                         // If last item, assume it has the same BitSize as previous
                         if (currentIndex == paramData.Enum.length - 1) {
                             thisItem = structuredClone(currentParam);
                             thisItem.Name = currentItem.value;
-                            thisItem.BitIndex = currentItem.index;
-                            thisItem.BitSize = bitSize;
+                            thisItem.BitIndex = parseInt(currentItem.index,10);
+                            thisItem.BitSize = parseInt(bitSize,10);
                             this.state.inputs.push(thisItem);
                         }
                         return currentItem;
