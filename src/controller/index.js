@@ -9,7 +9,6 @@ const { readEDS } = require("../eds-parser");
 const { Types } = require("../enip/cip/data-types");
 const { SINT, UINT, INT, DINT, UDINT, REAL, BOOL, BIT_STRING } = Types;
 const ci = require("correcting-interval");
-const BitSet = require("bitset");
 //const structuredClone = require("@ungap/structured-clone");
 
 const compare = (obj1, obj2) => {
