@@ -63,6 +63,7 @@ class Param extends EventEmitter {
             return;
         }
         this.controller._setOutputByName(this.name,value);
+        this.value = value;
         return;
     }
 
