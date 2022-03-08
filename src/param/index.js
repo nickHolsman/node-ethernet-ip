@@ -27,10 +27,12 @@ class Param extends EventEmitter {
         if (outputIndex > -1) {
             this.isOutput = true;
             this.output = this.controller.state.outputs[outputIndex];
+            this.value = this.output.Value;
         }
         if (inputIndex > -1) {
             this.isInput = true;
             this.input = this.controller.state.inputs[inputIndex];
+            this.value = this.input.Value;
         }
 
         if (outputIndex == -1 && inputIndex == -1) {
