@@ -167,9 +167,14 @@ class ENIP extends Socket {
 
         //////////////
 
-        const sessionErr = new Error(
-            "TIMEOUT occurred while attempting to establish Ethernet/IP session with Controller."
-        );
+        const sessionErr = () => {
+            // Clean Up Local Listeners
+            this.removeAllListeners("Session Registered");
+            this.removeAllListeners("Session Registration Failed");
+            throw new Error(
+                "TIMEOUT occurred while attempting to establish Ethernet/IP session with Controller."
+            );
+        };
 
         // Wait for Session to be Registered
         const sessid = await promiseTimeout(

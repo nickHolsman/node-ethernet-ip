@@ -69,6 +69,7 @@ class Param extends EventEmitter {
 
     changed(value) {
         let newValue = value;
+        let oldValue = this.value;
 
         if (this.bitIndex !== null) {
             newValue = (value & (1 << this.bitIndex)) == 0 ? 0 : 1;
@@ -77,7 +78,7 @@ class Param extends EventEmitter {
         if (this.value == newValue) return;
 
         this.value = newValue;
-        this.emit("Changed",newValue);
+        this.emit("Changed",newValue,oldValue);
         return;
     }
 
