@@ -1,6 +1,7 @@
 const { EventEmitter } = require("events");
 const crypto = require("crypto");
 const { CIP } = require("../enip");
+const { Types } = require("../enip/cip/data-types");
 
 // Static Class Property - Tracks Instances
 let instances = 0;
@@ -59,6 +60,9 @@ class Param extends EventEmitter {
         // If param has overriden bit index than update via bitwise
         if (this.bitIndex !== null) {
             let newValue = this.output.Value | ( 1 << this.bitIndex);
+            if (this.output.Type === Types.SINT) {
+                newValue = (newValue << 24) >> 24;
+            }
             this.controller._setOutputByName(this.name,newValue);
             return;
         }
