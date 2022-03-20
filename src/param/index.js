@@ -58,7 +58,7 @@ class Param extends EventEmitter {
 
         // If param has overriden bit index than update via bitwise
         if (this.bitIndex !== null) {
-            let newValue = this.value & ( 1 << this.bitIndex);
+            let newValue = this.output.Value | ( 1 << this.bitIndex);
             this.controller._setOutputByName(this.name,newValue);
             return;
         }
