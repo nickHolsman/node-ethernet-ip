@@ -57,7 +57,9 @@ class Controller extends ENIP {
                 outputSequence: 0,
                 inputLength: null,
                 outputLength: null,
-                outputInterval: null
+                outputInterval: null,
+                cycleTime: null,
+                timeout: null,
             }
         };
 
@@ -196,6 +198,8 @@ class Controller extends ENIP {
      * @returns 
      */
     async start_implicit(input_assem, output_assem, cycle_time = 1000, timeout = 2000) {
+        this.implicit.cycleTime = cycle_time;
+        this.implicit.timeout = timeout;
 
         // Throw error if EDS hasn't been supplied
         if (!this.EDS) {
@@ -821,8 +825,10 @@ class Controller extends ENIP {
         }); */
 
         this.state.implicit.session.on("close", () => {
-            console.info("Implicit IO Server Closed");
+            console.error("Implicit IO Server Closed");
+            console.info("Attempting to reconnect implicit");
             this.stop_implicit();
+            this._start_implicit(this.implicit.cycleTime,this.implicit.timeout);
             //this.emit('error');
         });
 
