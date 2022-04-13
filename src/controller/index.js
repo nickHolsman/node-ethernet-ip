@@ -828,7 +828,6 @@ class Controller extends ENIP {
             console.error("Implicit IO Server Closed");
             console.info("Attempting to reconnect implicit");
             this.stop_implicit();
-            this._start_implicit(this.implicit.cycleTime,this.implicit.timeout);
             //this.emit('error');
         });
 
