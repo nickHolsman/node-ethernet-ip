@@ -886,7 +886,7 @@ class Controller extends ENIP {
 
     async _inputTimeout(timeout = 2000) {
         this.state.implicit.inputTimer = setTimeout(() => {
-            console.debug("Implicit message timeout");
+            console.error("Implicit message timeout");
             this.stop_implicit();
             //TODO: Reconnect handling
             //this.connect(this.state.ip_address)
