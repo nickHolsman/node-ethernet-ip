@@ -198,8 +198,8 @@ class Controller extends ENIP {
      * @returns 
      */
     async start_implicit(input_assem, output_assem, cycle_time = 1000, timeout = 2000) {
-        this.implicit.cycleTime = cycle_time;
-        this.implicit.timeout = timeout;
+        this.state.implicit.cycleTime = cycle_time;
+        this.state.implicit.timeout = timeout;
 
         // Throw error if EDS hasn't been supplied
         if (!this.EDS) {
