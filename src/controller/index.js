@@ -917,7 +917,7 @@ class Controller extends ENIP {
 
         // Sequence Number
         this.state.implicit.outputSequence++;
-        if (this.state.implicit.outputSequence > 65535) this.state.implicit.outputSequence = 0;
+        if (this.state.implicit.outputSequence > 65535) this.state.implicit.outputSequence = 1;
         buf.writeUInt32LE(this.state.implicit.outputSequence,10);
 
         // Type ID Connected Data Item (0x00B1)
