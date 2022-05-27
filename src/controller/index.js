@@ -55,6 +55,7 @@ class Controller extends ENIP {
                 rawOutput: null,
                 inputSequence: null,
                 outputSequence: 0,
+                cipCount: 0,
                 inputLength: null,
                 outputLength: null,
                 outputInterval: null,
@@ -916,9 +917,10 @@ class Controller extends ENIP {
         buf.writeUInt32LE(this.state.implicit.connectionInfo.ot_connectionId,6);
 
         // Sequence Number
-        this.state.implicit.outputSequence++;
-        if (this.state.implicit.outputSequence > 65535) this.state.implicit.outputSequence = 1;
         buf.writeUInt32LE(this.state.implicit.outputSequence,10);
+
+        this.state.implicit.outputSequence++;
+        if (this.state.implicit.outputSequence > 0xFFFFFFFF) this.state.implicit.outputSequence = 0;
 
         // Type ID Connected Data Item (0x00B1)
         buf.writeUInt16LE(177,14);
@@ -926,8 +928,11 @@ class Controller extends ENIP {
         // Length
         buf.writeUInt16LE(this.state.implicit.rawOutput.length+2+4,16);
 
-        // CIP Sequence Count
-        buf.writeUInt16LE(this.state.implicit.outputSequence-1,18);
+        // CIP Count
+        buf.writeUInt16LE(this.state.implicit.cipCount,18);
+
+        this.state.implicit.cipCount++;
+        if (this.state.implicit.cipCount > 0xFFFF) this.state.implicit.cipCount = 0;
 
         //TODO: this needs to be read from the EDS connection manager section
         //for whether modeless or 32-bit header is expected. same for parsing incoming
