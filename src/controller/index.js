@@ -145,7 +145,7 @@ class Controller extends ENIP {
         // If EDS file is supplied, parse it
         if (EDS_LOCATION != 0 && !this.EDS) {
             //TODO: check EDS file exists
-            this._initializeEDS(EDS_LOCATION);
+            await this._initializeEDS(EDS_LOCATION);
         }
 
         this.state.controller.slot = SLOT;
@@ -431,6 +431,8 @@ class Controller extends ENIP {
     }
 
     async stop_implicit() {
+        console.warn('Stopping implicit messaging');
+        
         // Send FORWARD CLOSE request
         // stop UDP server
         
@@ -442,10 +444,11 @@ class Controller extends ENIP {
         if (this.state.implicit.sending) {
             ci.clearCorrectingInterval(this.state.implicit.outputInterval);
         }
-        
+
         this.state.implicit.connected = false;
         this.state.implicit.receiving = false;
         this.state.implicit.sending = false;
+        
         return;
     }
 
@@ -827,7 +830,6 @@ class Controller extends ENIP {
 
         this.state.implicit.session.on("close", () => {
             console.error("Implicit IO Server Closed");
-            console.info("Attempting to reconnect implicit");
             this.stop_implicit();
             //this.emit('error');
         });
@@ -901,6 +903,8 @@ class Controller extends ENIP {
     }
 
     async _sendOutput() {     
+        if (!this.state.implicit.connected) return;
+
         // Package IO message with stored rawOutput
         let buf = Buffer.alloc(18+2+4+this.state.implicit.outputLength);
 
