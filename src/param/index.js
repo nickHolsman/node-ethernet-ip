@@ -59,7 +59,10 @@ class Param extends EventEmitter {
 
         // If param has overriden bit index than update via bitwise
         if (this.bitIndex !== null) {
-            let newValue = this.output.Value | ( 1 << this.bitIndex);
+            let newValue;
+            if (value) newValue = this.output.Value | ( 1 << this.bitIndex); //turn bit on
+            else newValue = this.output.Value & ~( 1 << this.bitIndex);  //turn bit off
+
             if (this.output.Type === Types.SINT) {
                 newValue = (newValue << 24) >> 24;
             }
