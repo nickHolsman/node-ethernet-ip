@@ -134,6 +134,11 @@ class ENIP extends Socket {
 
         let connected = false;
 
+        super.on('error', (err) => {
+            console.error(err);
+            super.destroy();
+        })
+
         await promiseTimeout(
             new Promise(async (resolve) => {
                 await super.connect(
